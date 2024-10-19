@@ -309,6 +309,7 @@ namespace peris {
                     return allocations;
                 }
             }
+            return allocations;
         }
 
         bool draw(sf::RenderWindow &window) {
