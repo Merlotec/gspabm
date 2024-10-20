@@ -206,7 +206,7 @@ namespace peris {
 
             // Repeat for other agent
             allocations[b].agent = agent_a;
-            allocations[a].recalculate_utility();
+            allocations[b].recalculate_utility();
         }
 
     public:
@@ -235,7 +235,7 @@ namespace peris {
             }
         }
 
-        /// Solves the model to a precision of `epsilon`. The `shift` parameter specifies the starting offsets to use.
+        /// Solves the model to a precision of `epsilon`. Draws the progress graphically on the specified window.
         std::vector<Allocation<A, I> > &solve_visual(sf::RenderWindow &window, float epsilon = 1e-6) {
             // If there are no agents then they are vacuously solved.
             if (allocations.empty()) {
