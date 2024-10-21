@@ -208,6 +208,10 @@ int main() {
 
     solver.solve_visual(window);
 
+    // Run regression to calculate gsp:
+
+    solver.regress_price_on_quality();
+
     while (window.isOpen()) {
         sf::sleep(sf::seconds(0.1f));
         sf::Event event{};

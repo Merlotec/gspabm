@@ -416,6 +416,59 @@ namespace peris {
         bool draw(sf::RenderWindow &window) {
             return draw_allocations(window, this->allocations);
         }
+
+        void regress_price_on_quality() {
+            // Ensure there are enough data points
+            if (allocations.size() < 2) {
+                std::cerr << "Not enough data points to perform regression." << std::endl;
+                return;
+            }
+
+            size_t n = allocations.size();
+            float sum_x = 0.0f;   // Sum of qualities
+            float sum_y = 0.0f;   // Sum of prices
+            float sum_xx = 0.0f;  // Sum of qualities squared
+            float sum_xy = 0.0f;  // Sum of quality * price
+
+            for (const auto& alloc : allocations) {
+                float x = alloc.quality();
+                float y = alloc.price;
+                sum_x += x;
+                sum_y += y;
+                sum_xx += x * x;
+                sum_xy += x * y;
+            }
+
+            float x_bar = sum_x / n;
+            float y_bar = sum_y / n;
+
+            float Sxy = sum_xy - n * x_bar * y_bar;
+            float Sxx = sum_xx - n * x_bar * x_bar;
+
+            if (Sxx == 0.0f) {
+                std::cerr << "Cannot compute regression coefficients; division by zero." << std::endl;
+                return;
+            }
+
+            float b = Sxy / Sxx;          // Slope
+            float a = y_bar - b * x_bar;  // Intercept
+
+            std::cout << "Regression result: price = " << a << " + " << b << " * quality" << std::endl;
+
+            // Optionally, calculate the coefficient of determination (R^2)
+            float ss_tot = 0.0f;
+            float ss_res = 0.0f;
+            for (const auto& alloc : allocations) {
+                float x = alloc.quality();
+                float y = alloc.price;
+                float y_pred = a + b * x;
+                ss_tot += (y - y_bar) * (y - y_bar);
+                ss_res += (y - y_pred) * (y - y_pred);
+            }
+
+            float r_squared = 1 - (ss_res / ss_tot);
+            std::cout << "Coefficient of determination (R^2): " << r_squared << std::endl;
+        }
     };
 }
 
