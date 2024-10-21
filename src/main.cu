@@ -29,9 +29,9 @@ World create_world(const size_t school_count, const size_t house_count) {
 
 
 
-    std::normal_distribution<float> school_quality_distribution(0.65, 0.16);
+    std::normal_distribution<float> school_quality_distribution(0.85, 0.35);
     std::normal_distribution<float> ability_distribution(0, 1.0);
-    std::normal_distribution<float> aspiration_distribution(0.5, 0.1);
+    std::normal_distribution<float> aspiration_distribution(0.5, 0.2);
 
     constexpr float mean_household_inc = 100.0;
 

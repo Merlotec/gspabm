@@ -291,7 +291,7 @@ namespace peris {
         }
 
         /// Solves the model to a precision of `epsilon`. Draws the progress graphically on the specified window.
-        std::vector<Allocation<A, I> > &solve_visual(sf::RenderWindow &window, float epsilon = 1e-6) {
+        std::vector<Allocation<A, I> > &solve_visual(sf::RenderWindow &window, float epsilon = 1e-5) {
             // If there are no agents then they are vacuously solved.
             if (allocations.empty()) {
                 return allocations;
@@ -324,7 +324,7 @@ namespace peris {
                     // Now we want to find the price that makes the lower agent (i-1) indifferent between choosing their allocation and this new allocation.
 
                     float efficient_price;
-
+                    float u_delta;
                     // Now see if any agents i - 1 or below prefer this allocation to their own.
                     size_t k = i - 1;
                     while (true) {
@@ -333,17 +333,32 @@ namespace peris {
                         float max_price = indiff.agent.income() - epsilon;
 
                         // Function may break down at zero consumption, so we choose a value epsilon away).
-                        efficient_price = indifferent_price(indiff.agent, a.quality(), indiff.utility, indiff.price, max_price,
+                        float new_efficient_price = indifferent_price(indiff.agent, a.quality(), indiff.utility, indiff.price, max_price,
                                                                        epsilon);
+
+                        if (isnan(new_efficient_price)) {
+                            // Efficient price must be at boundaries.
+                            const float min_boundary = indiff.agent.utility(indiff.price, a.quality()) - indiff.utility;
+                            const float max_boundary = indiff.agent.utility(max_price, a.quality()) - indiff.utility;
+                            if (abs(min_boundary) < abs(max_boundary))
+                                new_efficient_price = indiff.price;
+                            else
+                                new_efficient_price = max_price;
+                        }
+
+                        efficient_price = new_efficient_price;
 
                         for (ssize_t j = k - 1; j >= 0; --j) {
                             Allocation<A, I> &prev = allocations[j];
                             // If this other previously allocated agent prefers this allocation over their own then we have a problem.
                             // We instead want to use this agent as the one who's indifference sets the price of the current allocation i.
-                            if (prev.agent.utility(efficient_price, a.quality()) > prev.utility) {
-                                // Update the indifferent agent to this new agent (which will iterate the while loop again).
-                                k = j;
-                                goto continue_while; // Continues outer loop.
+                            if (efficient_price + epsilon < prev.agent.income() && efficient_price + epsilon > prev.price) {
+                                if (prev.agent.utility(efficient_price + epsilon, a.quality()) > prev.utility) {
+                                    // Update the indifferent agent to this new agent (which will iterate the while loop again).
+                                    k = j;
+                                    u_delta = prev.agent.utility(efficient_price + epsilon, a.quality()) - prev.utility;
+                                    goto continue_while; // Continues outer loop.
+                                }
                             }
                         }
                         // No previous agents prefer another allocation, so we can proceed.
