@@ -27,7 +27,7 @@ struct Household {
     /// This is the utility function used for this agent.
     float utility(float price, float quality) const {
         // Additively separable utility function.
-        return powf((inc - price), (1 - aspiration)) + powf(3.f + quality, aspiration);
+        return powf((inc - price), (1 - aspiration)) + powf(10.f * quality, aspiration);
     }
 };
 

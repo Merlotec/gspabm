@@ -118,21 +118,21 @@ namespace peris {
     template<typename A, typename I>
         requires AgentConcept<A> && ItemConcept<I>
     bool draw_allocations(sf::RenderWindow &window, std::vector<peris::Allocation<A, I> > &allocations) {
-        float x_min = allocations.front().price * 0.9;
-        float x_max = allocations.back().price * 1.1;
+        float x_min_base = allocations.front().price * 0.9;
+        float x_max_base = allocations.back().price * 1.1;
 
-        float y_min = allocations.front().item.quality();
-        float y_max = allocations.back().item.quality() * 1.1;
+        float y_min_base = allocations.front().item.quality();
+        float y_max_base = allocations.back().item.quality() * 1.1;
 
         // Add padding
-        float x_padding = abs(x_max - x_min) * 0.01f;
-        float y_padding = abs(x_max - x_min) * 0.01f;
+        float x_padding = abs(x_max_base - x_min_base) * 0.05f;
+        float y_padding = abs(y_max_base - y_min_base) * 0.05f;
 
-        x_min -= x_padding;
-        y_min -= y_padding;
+        float x_min = x_min_base - x_padding;
+        float y_min = y_min_base - y_padding;
 
-        x_max += x_padding;
-        y_max += y_padding;
+        float x_max = x_max_base + x_padding;
+        float y_max = y_max_base +  y_padding;
 
         const float x_scale = window.getSize().x / (x_max - x_min);
         const float y_scale = window.getSize().y / (y_max - y_min);
@@ -150,13 +150,49 @@ namespace peris {
         // Clear the window with a white background
         window.clear(sf::Color::White);
 
+        // **Draw axes**
+        {
+            sf::VertexArray axes(sf::Lines);
+
+            // X-axis (horizontal line at y = 0 or at y_min if y = 0 is not in range)
+            float x_axis_y;
+            if (y_min <= 0 && y_max >= 0) {
+                // y = 0 is within y range
+                x_axis_y = window.getSize().y - (-y_min) * y_scale;
+            } else {
+                // y = 0 is not within range; draw x-axis at y_min
+                x_axis_y = window.getSize().y - (0 - y_min) * y_scale;
+            }
+
+            // Draw the x-axis line
+            axes.append(sf::Vertex(sf::Vector2f(0, x_axis_y), sf::Color::Black));
+            axes.append(sf::Vertex(sf::Vector2f(window.getSize().x, x_axis_y), sf::Color::Black));
+
+            // Y-axis (vertical line at x = 0 or at x_min if x = 0 is not in range)
+            float y_axis_x;
+            if (x_min <= 0 && x_max >= 0) {
+                // x = 0 is within x range
+                y_axis_x = (-x_min) * x_scale;
+            } else {
+                // x = 0 is not within range; draw y-axis at x_min
+                y_axis_x = (0 - x_min) * x_scale;
+            }
+
+            // Draw the y-axis line
+            axes.append(sf::Vertex(sf::Vector2f(y_axis_x, 0), sf::Color::Black));
+            axes.append(sf::Vertex(sf::Vector2f(y_axis_x, window.getSize().y), sf::Color::Black));
+
+            // Draw the axes on the window
+            window.draw(axes);
+        }
+
         // Draw indifference curves for each utility level
         for (const auto &a: allocations) {
             //std::cout << "Allocation: p:" << a.price << ", e:" << a.quality() << ", u:" << a.utility << std::endl;
             sf::VertexArray curve(sf::LineStrip);
 
             // Sample points along x-axis to plot the curve
-            for (float x = x_min; x <= x_max; x += 0.05f) {
+            for (float x = x_min_base; x <= x_max_base; x += 0.05f) {
                 // Find y such that U(x, y) = U0
                 float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max);
 
@@ -209,6 +245,25 @@ namespace peris {
             allocations[b].recalculate_utility();
         }
 
+        // Insert agent a into agent b's position, and shift everything up one.
+        void displace(size_t a, size_t b) {
+            assert(b < a);
+
+            // Put overridden agent into free agent buffer to be dealt with.
+            auto free_agent = allocations[b].agent;
+
+            allocations[b].agent = allocations[a].agent;
+            allocations[b].recalculate_utility();
+
+            for (size_t i = b + 1; i <= a; ++i) {
+                auto agent_buffer = allocations[i].agent;
+                allocations[i].agent = free_agent;
+                allocations[i].recalculate_utility();
+                free_agent = agent_buffer;
+            }
+            // Last agent is agent a which has already been moved to b so we don't need to worry about allocating this free agent.
+        }
+
     public:
         Solver(std::vector<A> agents, std::vector<I> items, float guess_factor) {
             // Ensure that there is one item per agent (numbers of each are the same).
@@ -249,11 +304,11 @@ namespace peris {
 
             // Iterate through the rest of the allocations (from 1 to n). Note: we may need to backtrack to the first agent if the second (or any subsequent agent) should be placed in allocation 0.
             // TODO: there is a slight worry about a cycle taking place where two allocations keep swapping, if they have very close utility functions, and the error margin of the computational solution results in contradicting comparisons.
-            for (int i = 1; i < allocations.size(); ++i) {
+            for (size_t i = 1; i < allocations.size(); ++i) {
                 // We allocate one agent at a time, iteratively. First, we must check if this agent prefers the (previous) lower agent's allocation (which is designed to be worse for them).
                 // If it is greater, we want to swap this agent with the lower agent. Once we swap, we must continue with this process until it is no longer necessary to swap (so we must check for n-2 as well, and if there is a swap, n-3 etc. etc.)
                 // After a swap, we need to recalculate the allocations for all the newly displaced agents.
-                bool should_swap_agents = false;
+                ssize_t agent_to_displace = -1;
 
                 Allocation<A, I> &a = allocations[i];
                 Allocation<A, I> &l = allocations[i - 1];
@@ -262,26 +317,57 @@ namespace peris {
                 // In theory this could be removed and the code should still work, but this allows us to avoid the costly operation of calculating if we can clearly see that they should swap.
                 if (a.agent.utility(l.price + epsilon, l.quality()) > a.utility && l.agent.utility(
                         a.price + epsilon, a.quality()) > l.utility) {
-                    should_swap_agents = true;
+                    agent_to_displace = i - 1;
                 }
 
-                if (!should_swap_agents) {
+                if (agent_to_displace == -1) {
                     // Now we want to find the price that makes the lower agent (i-1) indifferent between choosing their allocation and this new allocation.
-                    // Assuming well-behaved preferences, the price must be weakly greater than the current price and less than the agent's income.
-                    float max_price = l.agent.income() - epsilon;
-                    // Function may break down at zero consumption, so we choose a value epsilon away).
-                    const float efficient_price = indifferent_price(l.agent, a.quality(), l.utility, l.price, max_price,
-                                                                    epsilon);
+
+                    float efficient_price;
+
+                    // Now see if any agents i - 1 or below prefer this allocation to their own.
+                    size_t k = i - 1;
+                    while (true) {
+                        Allocation<A, I> &indiff = allocations[k];
+                        // Assuming well-behaved preferences, the price must be weakly greater than the current price and less than the agent's income.
+                        float max_price = indiff.agent.income() - epsilon;
+
+                        // Function may break down at zero consumption, so we choose a value epsilon away).
+                        efficient_price = indifferent_price(indiff.agent, a.quality(), indiff.utility, indiff.price, max_price,
+                                                                       epsilon);
+
+                        for (ssize_t j = k - 1; j >= 0; --j) {
+                            Allocation<A, I> &prev = allocations[j];
+                            // If this other previously allocated agent prefers this allocation over their own then we have a problem.
+                            // We instead want to use this agent as the one who's indifference sets the price of the current allocation i.
+                            if (prev.agent.utility(efficient_price, a.quality()) > prev.utility) {
+                                // Update the indifferent agent to this new agent (which will iterate the while loop again).
+                                k = j;
+                                goto continue_while; // Continues outer loop.
+                            }
+                        }
+                        // No previous agents prefer another allocation, so we can proceed.
+                        break;
+                        continue_while:;
+                    }
 
                     // Calculate utility associated with this new 'efficiently' priced allocation.
-                    const float efficient_utility = a.agent.utility(efficient_price, a.quality());
+                    float efficient_utility = a.agent.utility(efficient_price, a.quality());
 
                     // If this agent prefers the lower allocation at this 'efficient' price we need to swap.
                     // Include epsilon here to stop cycles (due to issues in approximating with many agents) since epsilon is the 'worst case' scenario, and if this inequality holds with epsilon then we definitely need to swap.
                     // If not, then the difference is small enough that the utilities are practically identical.
-                    if (a.agent.utility(l.price + epsilon, l.quality()) > efficient_utility) {
-                        should_swap_agents = true;
-                    } else {
+                    for (ssize_t j = i - 1; j >= 0; --j) {
+                        Allocation<A, I> &prev = allocations[j];
+                        const float u_prev = a.agent.utility(prev.price + epsilon, prev.quality());
+                        if (u_prev > efficient_utility) {
+                            // We prefer agent j's allocation, so would like to switch.
+                            agent_to_displace = j;
+                        }
+                    }
+
+                    // If we still do not want to swap agents then assign the efficient price. Everything up until now is efficient.
+                    if (agent_to_displace == -1) {
                         // Set the price to the efficient price corresponding to this agent - it doesn't matter if this agent ends up being swapped.
                         a.price = efficient_price;
                         // Rather than calling set price we do it manually since we have already calculated the utility.
@@ -289,18 +375,20 @@ namespace peris {
                     }
                 }
 
-                if (should_swap_agents) {
+                if (agent_to_displace >= 0) {
+                    assert(agent_to_displace < i); // Should only swap down.
+
                     // Swap agents.
-                    swap_agents(i, i - 1);
+                    displace(i, agent_to_displace);
 
                     // Because we have moved the current agent to the previous agent, but we now need to check if it should be moved back even further or ensure that the price is efficient for that new agent.
-                    if (i == 1) {
+                    if (agent_to_displace == 0) {
                         // Will hit zero so we cannot push this agent further back, or adjust the price of the allocation 0, so we want to only recalculate the agent now allocated to 1.
                         // This will keep i the same for the next iteration but will operate on a different agent because of the swap.
-                        i -= 1;
+                        i = 0;
                     } else {
                         // This means that the next iteration will be i = i-1 (since it is incremented by 1 by the for loop).
-                        i -= 2;
+                        i = agent_to_displace - 1;
                     }
                 }
 
