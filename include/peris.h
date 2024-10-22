@@ -9,6 +9,7 @@
 #include <vector>
 #include <cassert>
 #include <iostream>
+#include <iomanip>
 
 /// Pareto efficient relative investment solver (PERIS).
 namespace peris {
@@ -118,14 +119,14 @@ namespace peris {
     template<typename A, typename I>
         requires AgentConcept<A> && ItemConcept<I>
     bool draw_allocations(sf::RenderWindow &window, std::vector<peris::Allocation<A, I> > &allocations) {
-        float x_min_base = allocations.front().price * 0.9;
+        float x_min_base = 0.f;//allocations.front().price * 0.9;
         float x_max_base = allocations.back().price * 1.1;
 
-        float y_min_base = allocations.front().item.quality();
+        float y_min_base = 0.f;//allocations.front().item.quality();
         float y_max_base = allocations.back().item.quality() * 1.1;
 
         // Add padding
-        float x_padding = abs(x_max_base - x_min_base) * 0.05f;
+        float x_padding = abs(x_max_base - x_min_base) * 0.1f;
         float y_padding = abs(y_max_base - y_min_base) * 0.05f;
 
         float x_min = x_min_base - x_padding;
@@ -150,7 +151,42 @@ namespace peris {
         // Clear the window with a white background
         window.clear(sf::Color::White);
 
-        // **Draw axes**
+        // Draw indifference curves for each utility level
+        for (const auto &a: allocations) {
+            //std::cout << "Allocation: p:" << a.price << ", e:" << a.quality() << ", u:" << a.utility << std::endl;
+            sf::VertexArray curve(sf::LineStrip);
+
+            // Sample points along x-axis to plot the curve
+            for (float x = x_min_base; x <= x_max_base; x += 0.05f) {
+                // Find y such that U(x, y) = U0
+                float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max);
+
+                // Check if y is valid
+                if (!std::isnan(y)) {
+                    float screen_x = (x - x_min) * x_scale;
+                    float screen_y = window.getSize().y - (y - y_min) * y_scale;
+                    curve.append(sf::Vertex(sf::Vector2f(screen_x, screen_y), sf::Color::Red));
+                }
+            }
+            window.draw(curve);
+
+            float screen_x = (a.price - x_min) * x_scale;
+            float screen_y = window.getSize().y - (a.quality() - y_min) * y_scale;
+
+            sf::CircleShape circle(5); // Circle with radius 5 pixels
+            circle.setFillColor(sf::Color::Blue);
+            circle.setPosition(screen_x - 5, screen_y - 5); // Center the circle
+            window.draw(circle);
+        }
+
+        sf::Font font;
+        if (!font.loadFromFile("Arial.ttf")) {
+            // Handle error
+            std::cerr << "Error loading font!" << std::endl;
+            return false;
+        }
+
+        // Render axes after to control z-order.
         {
             sf::VertexArray axes(sf::Lines);
 
@@ -184,34 +220,103 @@ namespace peris {
 
             // Draw the axes on the window
             window.draw(axes);
-        }
 
-        // Draw indifference curves for each utility level
-        for (const auto &a: allocations) {
-            //std::cout << "Allocation: p:" << a.price << ", e:" << a.quality() << ", u:" << a.utility << std::endl;
-            sf::VertexArray curve(sf::LineStrip);
+            // **Draw axis labels**
+            // X-axis label
+            sf::Text xLabel("Price", font, 14);
+            xLabel.setFillColor(sf::Color::Black);
+            xLabel.setPosition(window.getSize().x - 50, x_axis_y - 20); // Adjust position as needed
+            window.draw(xLabel);
 
-            // Sample points along x-axis to plot the curve
-            for (float x = x_min_base; x <= x_max_base; x += 0.05f) {
-                // Find y such that U(x, y) = U0
-                float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max);
+            // Y-axis label
+            sf::Text yLabel("Quality", font, 14);
+            yLabel.setFillColor(sf::Color::Black);
+            yLabel.setPosition(y_axis_x + 5, 5); // Adjust position as needed
 
-                // Check if y is valid
-                if (!std::isnan(y)) {
-                    float screen_x = (x - x_min) * x_scale;
-                    float screen_y = window.getSize().y - (y - y_min) * y_scale;
-                    curve.append(sf::Vertex(sf::Vector2f(screen_x, screen_y), sf::Color::Red));
+            window.draw(yLabel);
+
+             // **Draw tick marks and labels with regular intervals**
+
+            // Helper function to calculate 'nice' numbers for intervals
+            auto calculateNiceNumber = [](float range, bool round) {
+                float exponent = std::floor(std::log10(range));
+                float fraction = range / std::pow(10, exponent);
+
+                float niceFraction;
+                if (round) {
+                    if (fraction < 1.5f)
+                        niceFraction = 1.0f;
+                    else if (fraction < 3.0f)
+                        niceFraction = 2.0f;
+                    else if (fraction < 7.0f)
+                        niceFraction = 5.0f;
+                    else
+                        niceFraction = 10.0f;
+                } else {
+                    if (fraction <= 1.0f)
+                        niceFraction = 1.0f;
+                    else if (fraction <= 2.0f)
+                        niceFraction = 2.0f;
+                    else if (fraction <= 5.0f)
+                        niceFraction = 5.0f;
+                    else
+                        niceFraction = 10.0f;
                 }
+
+                return niceFraction * std::pow(10, exponent);
+            };
+
+            // X-axis ticks
+            int desiredXTicks = 5;
+            float x_range = x_max - x_min;
+            float x_tick_interval = calculateNiceNumber(x_range / (desiredXTicks - 1), true);
+            float x_nice_min = std::floor(x_min / x_tick_interval) * x_tick_interval;
+            float x_nice_max = std::ceil(x_max / x_tick_interval) * x_tick_interval;
+
+            for (float x_value = x_nice_min; x_value <= x_nice_max; x_value += x_tick_interval) {
+                float screen_x = (x_value - x_min) * x_scale;
+
+                // Draw tick
+                sf::Vertex tick[] = {
+                    sf::Vertex(sf::Vector2f(screen_x, x_axis_y - 5), sf::Color::Black),
+                    sf::Vertex(sf::Vector2f(screen_x, x_axis_y + 5), sf::Color::Black)
+                };
+                window.draw(tick, 2, sf::Lines);
+
+                // Draw label
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(2) << x_value;
+                sf::Text label(ss.str(), font, 12);
+                label.setFillColor(sf::Color::Black);
+                label.setPosition(screen_x - 15, x_axis_y + 10); // Adjust position as needed
+                window.draw(label);
             }
-            window.draw(curve);
 
-            float screen_x = (a.price - x_min) * x_scale;
-            float screen_y = window.getSize().y - (a.quality() - y_min) * y_scale;
+            // Y-axis ticks
+            int desiredYTicks = 5;
+            float y_range = y_max - y_min;
+            float y_tick_interval = calculateNiceNumber(y_range / (desiredYTicks - 1), true);
+            float y_nice_min = std::floor(y_min / y_tick_interval) * y_tick_interval;
+            float y_nice_max = std::ceil(y_max / y_tick_interval) * y_tick_interval;
 
-            sf::CircleShape circle(5); // Circle with radius 5 pixels
-            circle.setFillColor(sf::Color::Blue);
-            circle.setPosition(screen_x - 5, screen_y - 5); // Center the circle
-            window.draw(circle);
+            for (float y_value = y_nice_min; y_value <= y_nice_max; y_value += y_tick_interval) {
+                float screen_y = window.getSize().y - (y_value - y_min) * y_scale;
+
+                // Draw tick
+                sf::Vertex tick[] = {
+                    sf::Vertex(sf::Vector2f(y_axis_x - 5, screen_y), sf::Color::Black),
+                    sf::Vertex(sf::Vector2f(y_axis_x + 5, screen_y), sf::Color::Black)
+                };
+                window.draw(tick, 2, sf::Lines);
+
+                // Draw label
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(2) << y_value;
+                sf::Text label(ss.str(), font, 12);
+                label.setFillColor(sf::Color::Black);
+                label.setPosition(y_axis_x - 50, screen_y - 10); // Adjust position as needed
+                window.draw(label);
+            }
         }
 
         // Display the current frame
@@ -315,10 +420,10 @@ namespace peris {
 
                 // If this condition holds, this agent prefers the lower allocation, and the lower agent prefers this allocation, so they should swap.
                 // In theory this could be removed and the code should still work, but this allows us to avoid the costly operation of calculating if we can clearly see that they should swap.
-                if (a.agent.utility(l.price + epsilon, l.quality()) > a.utility && l.agent.utility(
-                        a.price + epsilon, a.quality()) > l.utility) {
-                    agent_to_displace = i - 1;
-                }
+                // if (a.agent.utility(l.price + epsilon, l.quality()) > a.utility && l.agent.utility(
+                //         a.price + epsilon, a.quality()) > l.utility) {
+                //     agent_to_displace = i - 1;
+                // }
 
                 if (agent_to_displace == -1) {
                     // Now we want to find the price that makes the lower agent (i-1) indifferent between choosing their allocation and this new allocation.
