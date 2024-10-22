@@ -8,6 +8,7 @@
 #include "peris.h"
 #include "render.h"
 #include <cassert>
+#include <optional>
 
 #ifndef __ssize_t_defined
 typedef long int ssize_t;
@@ -110,7 +111,7 @@ namespace peris {
          * @param epsilon The tolerance for numerical approximations (default is 1e-5).
          * @return A reference to the vector of allocations after solving.
          */
-        std::vector<Allocation<A, I>>& solve(RenderState<A, I>& render_state, float epsilon = 1e-5) {
+        std::vector<Allocation<A, I>>& solve(RenderState<A, I>* render_state, float epsilon = 1e-5) {
             // If there are no agents, return the empty allocations vector.
             if (allocations.empty()) {
                 return allocations;
@@ -186,17 +187,20 @@ namespace peris {
                     // This price cannot be paid by the agent, thus this allocation does not work.
                     // Given that any price below will be preferred by the agent below, we will need to swap.
                     // We can displace by -1 and see what happens.
-                    agent_to_displace = i - 1;
+                    agent_to_displace = i-1;
                 } else {
                     // Calculate the utility of the current agent 'a' at the 'efficient_price'.
                     float efficient_utility = a.agent.utility(efficient_price, a.quality());
 
                     // Check if the current agent 'a' prefers any of the previous allocations over their own at 'efficient_price'.
                     // If so, mark the agent to displace.
+                    float u_max = efficient_utility;
                     for (ssize_t j = i - 1; j >= 0; --j) {
                         const Allocation<A, I>& prev = allocations[j];
-                        if (a.agent.utility(prev.price + epsilon, prev.quality()) > efficient_utility) {
+                        float u_prev = a.agent.utility(prev.price + 100.f * epsilon, prev.quality());
+                        if (u_prev > u_max) {
                             // The current agent 'a' prefers 'prev''s allocation; mark 'prev' as the agent to displace.
+                            u_max = u_prev;
                             agent_to_displace = j;
                         }
                     }
@@ -226,15 +230,17 @@ namespace peris {
                     }
                 }
 
-                if (!draw(render_state)) {
-                    return allocations;
+                if (render_state != nullptr) {
+                    if (!render_state->draw_allocations(this->allocations, i)) {
+                        return allocations;
+                    }
                 }
             }
             return allocations;
         }
 
-        bool draw(RenderState<A, I> &render_state) {
-            return render_state.draw_allocations(this->allocations);
+        bool draw(RenderState<A, I>* render_state) {
+            return render_state->draw_allocations(this->allocations, -1);
         }
 
         void regress_price_on_quality() {

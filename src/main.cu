@@ -29,7 +29,7 @@ World create_world(const size_t school_count, const size_t house_count) {
 
 
 
-    std::normal_distribution<float> school_quality_distribution(0.85, 0.35);
+    std::normal_distribution<float> school_quality_distribution(1.2, 0.3);
     std::normal_distribution<float> ability_distribution(0, 1.0);
     std::normal_distribution<float> aspiration_distribution(0.5, 0.2);
 
@@ -190,8 +190,8 @@ __global__ void determine_bids(Household* households, int household_count, Schoo
 }
 
 int main() {
-    constexpr size_t school_count = 20;
-    constexpr size_t house_count = 20;
+    constexpr size_t school_count = 50;
+    constexpr size_t house_count = 50;
 
     std::cout << "Creating with " << school_count << " schools" << " and " << house_count << " houses" << std::endl;
 
@@ -206,14 +206,14 @@ int main() {
     // Setup render window to draw visuals.
     peris::RenderState<Household, House> render_state(solver.get_allocations());
 
-    solver.draw(render_state);
+    solver.draw(&render_state);
 
-    solver.solve(render_state);
+    solver.solve(&render_state);
 
     // Run regression to calculate gsp:
 
     solver.regress_price_on_quality();
 
-    while (solver.draw(render_state)) {}
+    while (solver.draw(&render_state)) {}
     return 0;
 }

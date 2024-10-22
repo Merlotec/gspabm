@@ -27,7 +27,7 @@ namespace peris {
         inline void update_allocations(const std::vector<peris::Allocation<A, I>>& new_allocations);
 
         // Draw allocations
-        inline bool draw_allocations(const std::vector<peris::Allocation<A, I>>& new_allocations);
+        inline bool draw_allocations(const std::vector<peris::Allocation<A, I>>& new_allocations, int current_idx);
 
         // Public window field (if needed outside)
         sf::RenderWindow window;
@@ -50,8 +50,11 @@ namespace peris {
 
         // Coordinate transformations
         float x_min, x_max, y_min, y_max;
+        float x_min_base, x_max_base, y_min_base, y_max_base;
         float x_scale, y_scale;
         float x_axis_y, y_axis_x;
+
+        float epsilon = 1e-4;
 
         // Store previous allocations for comparison
         std::vector<peris::Allocation<A, I>> old_allocations;
@@ -64,7 +67,7 @@ namespace peris {
 
     template<typename A, typename I>
     inline RenderState<A, I>::RenderState(const std::vector<peris::Allocation<A, I>>& allocations)
-        : old_allocations(allocations), window(sf::VideoMode(800, 600), "Allocations") {
+        : old_allocations(allocations), window(sf::VideoMode(1500, 1000), "Pareto Efficient Relative Investment Solver (PERIS)") {
         // Load font
         if (!font.loadFromFile("Arial.ttf")) {
             std::cerr << "Error loading font!" << std::endl;
@@ -79,8 +82,16 @@ namespace peris {
             // Indifference Curve
             sf::VertexArray curve(sf::LineStrip);
 
-            for (float x = x_min; x <= x_max; x += 0.05f) {
-                float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max);
+            for (float x = x_min; x <= a.agent.income(); x += 0.05f) {
+
+                float x_use;
+                if (x > a.agent.income()) {
+                     x_use = a.agent.income() - epsilon;
+                } else {
+                    x_use = x;
+                }
+
+                float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
 
                 if (!std::isnan(y) && y >= y_min && y <= y_max) {
                     float screen_x = (x - x_min) * x_scale;
@@ -105,10 +116,10 @@ namespace peris {
     template<typename A, typename I>
     inline void RenderState<A, I>::compute_coordinate_transformations(const std::vector<peris::Allocation<A, I>>& allocations) {
         // Compute bounds based on allocations
-        float x_min_base = 0.f;
-        float x_max_base = allocations.back().price * 1.1f;
-        float y_min_base = 0.f;
-        float y_max_base = allocations.back().quality() * 1.1f;
+        x_min_base = 0.f;
+        x_max_base = allocations.back().price * 1.1f;
+        y_min_base = 0.f;
+        y_max_base = allocations.back().quality() * 1.1f;
 
         // Add padding
         float x_padding = std::abs(x_max_base - x_min_base) * 0.1f;
@@ -260,7 +271,14 @@ namespace peris {
                 sf::VertexArray curve(sf::LineStrip);
 
                 for (float x = x_min; x <= x_max; x += 0.05f) {
-                    float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max);
+                    float x_use;
+                    if (x > a.agent.income()) {
+                        x_use = a.agent.income() - epsilon;
+                    } else {
+                        x_use = x;
+                    }
+
+                    float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
 
                     if (!std::isnan(y) && y >= y_min && y <= y_max) {
                         float screen_x = (x - x_min) * x_scale;
@@ -294,8 +312,16 @@ namespace peris {
             // Recompute indifference curve
             sf::VertexArray curve(sf::LineStrip);
 
+            const auto& a = new_alloc;
             for (float x = x_min; x <= x_max; x += 0.05f) {
-                float y = indifferent_quality(new_alloc.agent, x, new_alloc.utility, y_min, y_max);
+                float x_use;
+                if (x > a.agent.income()) {
+                    x_use = a.agent.income() - epsilon;
+                } else {
+                    x_use = x;
+                }
+
+                float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
 
                 if (!std::isnan(y) && y >= y_min && y <= y_max) {
                     float screen_x = (x - x_min) * x_scale;
@@ -314,7 +340,7 @@ namespace peris {
     }
 
     template<typename A, typename I>
-    inline bool RenderState<A, I>::draw_allocations(const std::vector<peris::Allocation<A, I>>& new_allocations) {
+    inline bool RenderState<A, I>::draw_allocations(const std::vector<peris::Allocation<A, I>>& new_allocations, int current_idx) {
         // Update allocations
         update_allocations(new_allocations);
 
@@ -359,7 +385,17 @@ namespace peris {
 
         // Draw indifference curves
         for (size_t i = 0; i < indifference_curves.size(); ++i) {
-            sf::Color curve_color = (static_cast<int>(i) == hovered_allocation_index) ? sf::Color::Yellow : sf::Color::Red;
+            sf::Color curve_color = (static_cast<int>(i) == hovered_allocation_index) ? sf::Color::Cyan : sf::Color::Red;
+
+            if (current_idx >= 0) {
+                  if (i > current_idx) {
+                      curve_color = sf::Color::Transparent;
+                  } else if (i == current_idx) {
+                      curve_color = sf::Color::Green;
+                  }
+
+            }
+
             sf::VertexArray& curve = indifference_curves[i];
 
             // Update color
@@ -371,7 +407,7 @@ namespace peris {
 
         // Draw allocation circles
         for (size_t i = 0; i < allocation_circles.size(); ++i) {
-            sf::Color circle_color = (static_cast<int>(i) == hovered_allocation_index) ? sf::Color::Green : sf::Color::Blue;
+            sf::Color circle_color = (static_cast<int>(i) == hovered_allocation_index) ? sf::Color::Cyan : sf::Color::Blue;
             sf::CircleShape& circle = allocation_circles[i];
             circle.setFillColor(circle_color);
             window.draw(circle);
