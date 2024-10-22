@@ -223,53 +223,53 @@ namespace peris {
 
             // **Draw axis labels**
             // X-axis label
-            sf::Text xLabel("Price", font, 14);
-            xLabel.setFillColor(sf::Color::Black);
-            xLabel.setPosition(window.getSize().x - 50, x_axis_y - 20); // Adjust position as needed
-            window.draw(xLabel);
+            sf::Text x_label("Price", font, 14);
+            x_label.setFillColor(sf::Color::Black);
+            x_label.setPosition(window.getSize().x - 50, x_axis_y - 20); // Adjust position as needed
+            window.draw(x_label);
 
             // Y-axis label
-            sf::Text yLabel("Quality", font, 14);
-            yLabel.setFillColor(sf::Color::Black);
-            yLabel.setPosition(y_axis_x + 5, 5); // Adjust position as needed
+            sf::Text y_label("Quality", font, 14);
+            y_label.setFillColor(sf::Color::Black);
+            y_label.setPosition(y_axis_x + 5, 5); // Adjust position as needed
 
-            window.draw(yLabel);
+            window.draw(y_label);
 
              // **Draw tick marks and labels with regular intervals**
 
             // Helper function to calculate 'nice' numbers for intervals
-            auto calculateNiceNumber = [](float range, bool round) {
+            auto calculate_nice_number = [](float range, bool round) {
                 float exponent = std::floor(std::log10(range));
                 float fraction = range / std::pow(10, exponent);
 
-                float niceFraction;
+                float nice_fraction;
                 if (round) {
                     if (fraction < 1.5f)
-                        niceFraction = 1.0f;
+                        nice_fraction = 1.0f;
                     else if (fraction < 3.0f)
-                        niceFraction = 2.0f;
+                        nice_fraction = 2.0f;
                     else if (fraction < 7.0f)
-                        niceFraction = 5.0f;
+                        nice_fraction = 5.0f;
                     else
-                        niceFraction = 10.0f;
+                        nice_fraction = 10.0f;
                 } else {
                     if (fraction <= 1.0f)
-                        niceFraction = 1.0f;
+                        nice_fraction = 1.0f;
                     else if (fraction <= 2.0f)
-                        niceFraction = 2.0f;
+                        nice_fraction = 2.0f;
                     else if (fraction <= 5.0f)
-                        niceFraction = 5.0f;
+                        nice_fraction = 5.0f;
                     else
-                        niceFraction = 10.0f;
+                        nice_fraction = 10.0f;
                 }
 
-                return niceFraction * std::pow(10, exponent);
+                return nice_fraction * std::pow(10, exponent);
             };
 
             // X-axis ticks
-            int desiredXTicks = 5;
+            int desired_x_ticks = 5;
             float x_range = x_max - x_min;
-            float x_tick_interval = calculateNiceNumber(x_range / (desiredXTicks - 1), true);
+            float x_tick_interval = calculate_nice_number(x_range / (desired_x_ticks - 1), true);
             float x_nice_min = std::floor(x_min / x_tick_interval) * x_tick_interval;
             float x_nice_max = std::ceil(x_max / x_tick_interval) * x_tick_interval;
 
@@ -293,9 +293,9 @@ namespace peris {
             }
 
             // Y-axis ticks
-            int desiredYTicks = 5;
+            int desired_y_ticks = 5;
             float y_range = y_max - y_min;
-            float y_tick_interval = calculateNiceNumber(y_range / (desiredYTicks - 1), true);
+            float y_tick_interval = calculate_nice_number(y_range / (desired_y_ticks - 1), true);
             float y_nice_min = std::floor(y_min / y_tick_interval) * y_tick_interval;
             float y_nice_max = std::ceil(y_max / y_tick_interval) * y_tick_interval;
 
