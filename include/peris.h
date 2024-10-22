@@ -429,8 +429,11 @@ namespace peris {
                     // Now we want to find the price that makes the lower agent (i-1) indifferent between choosing their allocation and this new allocation.
                     float efficient_price;
                     // Now see if any agents i - 1 or below prefer this allocation to their own.
-                    size_t k = i - 1;
-                    while (true) {
+                    size_t k;
+                    size_t next_k = i - 1;
+                    // Try with a new k.
+                    do {
+                        k = next_k;
                         Allocation<A, I> &indiff = allocations[k];
                         // Assuming well-behaved preferences, the price must be weakly greater than the current price and less than the agent's income.
                         float max_price = indiff.agent.income() - epsilon;
@@ -459,15 +462,13 @@ namespace peris {
                                 assert(a.quality() >= prev.quality());
                                 if (prev.agent.utility(efficient_price + epsilon, a.quality()) > prev.utility) {
                                     // Update the indifferent agent to this new agent (which will iterate the while loop again).
-                                    k = j;
-                                    goto continue_while; // Continues outer loop.
+                                    next_k = j;
+                                    break;
                                 }
                             }
                         }
-                        // No previous agents prefer another allocation, so we can proceed.
-                        break;
-                        continue_while:;
-                    }
+                        // If next_k is set to another element, repeat for that k.
+                    } while (next_k < k);
 
                     // Calculate utility associated with this new 'efficiently' priced allocation.
                     float efficient_utility = a.agent.utility(efficient_price, a.quality());
