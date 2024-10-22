@@ -117,26 +117,32 @@ namespace peris {
 
 
     template<typename A, typename I>
-        requires AgentConcept<A> && ItemConcept<I>
-    bool draw_allocations(sf::RenderWindow &window, std::vector<peris::Allocation<A, I> > &allocations) {
-        float x_min_base = 0.f;//allocations.front().price * 0.9;
+    requires AgentConcept<A> && ItemConcept<I>
+    bool draw_allocations(sf::RenderWindow &window, std::vector<peris::Allocation<A, I>>& allocations) {
+        float x_min_base = 0.f; // allocations.front().price * 0.9;
         float x_max_base = allocations.back().price * 1.1;
 
-        float y_min_base = 0.f;//allocations.front().item.quality();
+        float y_min_base = 0.f; // allocations.front().item.quality();
         float y_max_base = allocations.back().item.quality() * 1.1;
 
         // Add padding
-        float x_padding = abs(x_max_base - x_min_base) * 0.1f;
-        float y_padding = abs(y_max_base - y_min_base) * 0.05f;
+        float x_padding = std::abs(x_max_base - x_min_base) * 0.1f;
+        float y_padding = std::abs(y_max_base - y_min_base) * 0.05f;
 
         float x_min = x_min_base - x_padding;
         float y_min = y_min_base - y_padding;
 
         float x_max = x_max_base + x_padding;
-        float y_max = y_max_base +  y_padding;
+        float y_max = y_max_base + y_padding;
 
         const float x_scale = window.getSize().x / (x_max - x_min);
         const float y_scale = window.getSize().y / (y_max - y_min);
+
+        // Variable to track which allocation (if any) the mouse is hovering over
+        int hoveredAllocationIndex = -1;
+
+        // Get the current mouse position relative to the window
+        sf::Vector2i mousePosition = sf::Mouse::getPosition(window);
 
         // Process events
         sf::Event event{};
@@ -151,9 +157,43 @@ namespace peris {
         // Clear the window with a white background
         window.clear(sf::Color::White);
 
+        sf::Font font;
+        if (!font.loadFromFile("Arial.ttf")) {
+            // Handle error
+            std::cerr << "Error loading font!" << std::endl;
+            return false;
+        }
+
+        // First, determine if the mouse is over any allocation point
+        for (size_t i = 0; i < allocations.size(); ++i) {
+            const auto& a = allocations[i];
+
+            // Convert allocation point to screen coordinates
+            float screen_x = (a.price - x_min) * x_scale;
+            float screen_y = window.getSize().y - (a.quality() - y_min) * y_scale;
+
+            // Compute the distance between the mouse and the center of the circle
+            float dx = mousePosition.x - screen_x;
+            float dy = mousePosition.y - screen_y;
+            float distance = std::sqrt(dx * dx + dy * dy);
+
+            // Assuming circle radius is 5 pixels
+            float circleRadius = 5.f;
+
+            if (distance <= circleRadius) {
+                // Mouse is hovering over this allocation point
+                hoveredAllocationIndex = static_cast<int>(i);
+                break; // No need to check other points
+            }
+        }
+
         // Draw indifference curves for each utility level
-        for (const auto &a: allocations) {
-            //std::cout << "Allocation: p:" << a.price << ", e:" << a.quality() << ", u:" << a.utility << std::endl;
+        for (size_t i = 0; i < allocations.size(); ++i) {
+            const auto& a = allocations[i];
+
+            // Choose the color based on whether this is the hovered allocation
+            sf::Color curveColor = (static_cast<int>(i) == hoveredAllocationIndex) ? sf::Color::Yellow : sf::Color::Red;
+
             sf::VertexArray curve(sf::LineStrip);
 
             // Sample points along x-axis to plot the curve
@@ -165,25 +205,34 @@ namespace peris {
                 if (!std::isnan(y)) {
                     float screen_x = (x - x_min) * x_scale;
                     float screen_y = window.getSize().y - (y - y_min) * y_scale;
-                    curve.append(sf::Vertex(sf::Vector2f(screen_x, screen_y), sf::Color::Red));
+                    curve.append(sf::Vertex(sf::Vector2f(screen_x, screen_y), curveColor));
                 }
             }
             window.draw(curve);
 
+            // Draw the allocation point
             float screen_x = (a.price - x_min) * x_scale;
             float screen_y = window.getSize().y - (a.quality() - y_min) * y_scale;
 
+            // If this allocation is hovered, draw the circle in a highlighted color
+            sf::Color circleColor = (static_cast<int>(i) == hoveredAllocationIndex) ? sf::Color::Green : sf::Color::Blue;
+
             sf::CircleShape circle(5); // Circle with radius 5 pixels
-            circle.setFillColor(sf::Color::Blue);
+            circle.setFillColor(circleColor);
             circle.setPosition(screen_x - 5, screen_y - 5); // Center the circle
             window.draw(circle);
         }
 
-        sf::Font font;
-        if (!font.loadFromFile("Arial.ttf")) {
-            // Handle error
-            std::cerr << "Error loading font!" << std::endl;
-            return false;
+        // Optionally, display agent information when hovered
+        if (hoveredAllocationIndex >= 0) {
+            const auto& a = allocations[hoveredAllocationIndex];
+
+            std::ostringstream info;
+            info << "Utility: " << a.utility;
+            sf::Text agentInfo(info.str(), font, 14);
+            agentInfo.setFillColor(sf::Color::Black);
+            agentInfo.setPosition(mousePosition.x + 10, mousePosition.y + 10); // Adjust position as needed
+            window.draw(agentInfo);
         }
 
         // Render axes after to control z-order.
@@ -235,7 +284,7 @@ namespace peris {
 
             window.draw(y_label);
 
-             // **Draw tick marks and labels with regular intervals**
+            // **Draw tick marks and labels with regular intervals**
 
             // Helper function to calculate 'nice' numbers for intervals
             auto calculate_nice_number = [](float range, bool round) {
@@ -326,6 +375,7 @@ namespace peris {
         return true;
     }
 
+
     /// The class providing the solving functionality, requiring an agent type A and a utility function, U.
     /// Templates are used so that the function can be inlined, and so that the agent type can be stored in the array.
     /// This improves cache locality, which should improve performance.
@@ -415,11 +465,10 @@ namespace peris {
          *
          * The function visualizes the progress by drawing on the specified SFML window.
          *
-         * @param window The SFML window where the allocation progress is visualized.
          * @param epsilon The tolerance for numerical approximations (default is 1e-5).
          * @return A reference to the vector of allocations after solving.
          */
-        std::vector<Allocation<A, I>>& solve_visual(sf::RenderWindow& window, float epsilon = 1e-5) {
+        std::vector<Allocation<A, I>>& solve(float epsilon = 1e-5) {
             // If there are no agents, return the empty allocations vector.
             if (allocations.empty()) {
                 return allocations;
@@ -441,6 +490,7 @@ namespace peris {
 
                 // Determine the 'efficient_price' at which a previous agent 'k' is indifferent
                 // between their own allocation and the current allocation 'a'.
+                // TODO: issue with efficient price being chosen above agent's income (I think)... what to do???
                 float efficient_price;
                 size_t k;             // Index of the agent whose indifference sets the price.
                 size_t next_k = i - 1; // Start with the previous agent.
@@ -490,24 +540,31 @@ namespace peris {
                     // Repeat the loop if 'next_k' has been updated to an earlier agent.
                 } while (next_k < k);
 
-                // Calculate the utility of the current agent 'a' at the 'efficient_price'.
-                float efficient_utility = a.agent.utility(efficient_price, a.quality());
+                if (efficient_price > a.agent.income()) {
+                    // This price cannot be paid by the agent, thus this allocation does not work.
+                    // Given that any price below will be preferred by the agent below, we will need to swap.
+                    // We can displace by -1 and see what happens.
+                    agent_to_displace = i - 1;
+                } else {
+                    // Calculate the utility of the current agent 'a' at the 'efficient_price'.
+                    float efficient_utility = a.agent.utility(efficient_price, a.quality());
 
-                // Check if the current agent 'a' prefers any of the previous allocations over their own at 'efficient_price'.
-                // If so, mark the agent to displace.
-                for (ssize_t j = i - 1; j >= 0; --j) {
-                    const Allocation<A, I>& prev = allocations[j];
-                    if (a.agent.utility(prev.price + epsilon, prev.quality()) > efficient_utility) {
-                        // The current agent 'a' prefers 'prev''s allocation; mark 'prev' as the agent to displace.
-                        agent_to_displace = j;
+                    // Check if the current agent 'a' prefers any of the previous allocations over their own at 'efficient_price'.
+                    // If so, mark the agent to displace.
+                    for (ssize_t j = i - 1; j >= 0; --j) {
+                        const Allocation<A, I>& prev = allocations[j];
+                        if (a.agent.utility(prev.price + epsilon, prev.quality()) > efficient_utility) {
+                            // The current agent 'a' prefers 'prev''s allocation; mark 'prev' as the agent to displace.
+                            agent_to_displace = j;
+                        }
                     }
-                }
 
-                // If no displacement is needed, update the current allocation's price and utility.
-                if (agent_to_displace == -1) {
-                    // Set the price to the 'efficient_price' and update utility for the current allocation.
-                    a.price = efficient_price;
-                    a.utility = efficient_utility;
+                    // If no displacement is needed, update the current allocation's price and utility.
+                    if (agent_to_displace == -1) {
+                        // Set the price to the 'efficient_price' and update utility for the current allocation.
+                        a.price = efficient_price;
+                        a.utility = efficient_utility;
+                    }
                 }
 
                 if (agent_to_displace >= 0) {
@@ -525,12 +582,6 @@ namespace peris {
                         // Set 'i' to 'agent_to_displace - 1' because the for-loop will increment 'i' next.
                         i = agent_to_displace - 1;
                     }
-                }
-
-                // Draw the current state of allocations on the window for visualization.
-                if (!draw(window)) {
-                    // If the window is closed or drawing fails, return the current allocations.
-                    return allocations;
                 }
             }
             return allocations;
