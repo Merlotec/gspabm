@@ -199,19 +199,21 @@ int main() {
 
     std::cout << "Created world" << std::endl;
 
+    assert(world.validate());
+
     auto solver = world.solver();
 
     // Setup render window to draw visuals.
-    sf::RenderWindow window(sf::VideoMode(800, 600), "Pareto Efficient Relative Investment Solver (PERIS)");
+    peris::RenderState<Household, House> render_state(solver.get_allocations());
 
-    solver.draw(window);
+    solver.draw(render_state);
 
-    solver.solve();
+    solver.solve(render_state);
 
     // Run regression to calculate gsp:
 
     solver.regress_price_on_quality();
 
-    while (solver.draw(window)) {}
+    while (solver.draw(render_state)) {}
     return 0;
 }

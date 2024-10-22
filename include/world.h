@@ -5,8 +5,12 @@
 #ifndef AGENT_H
 #define AGENT_H
 
-#include <peris.h>
+#include "solver.h"
 #include <vector>
+
+#ifndef __ssize_t_defined
+typedef long int ssize_t;
+#endif
 
 struct Household {
     float inc;
@@ -28,6 +32,10 @@ struct Household {
     float utility(float price, float quality) const {
         // Additively separable utility function.
         return powf((inc - price), (1 - aspiration)) + powf(10.f * quality, aspiration);
+    }
+
+    std::string debug_info() const {
+        return "y=" + std::to_string(inc) + "\nas=" + std::to_string(aspiration) + "\nab=" + std::to_string(ability);
     }
 };
 
@@ -90,6 +98,10 @@ public:
 
     /// Updates the world to reflect the solution from the solver.
     void reflect_solution(peris::Allocation<Household, House> solution_allocation);
+
+    /// Checks that the households and schools have valid values (such that the preferences will be well-behaved).
+    /// Essentially we check that aspiration is between 0 and 1, educational quality is positive, and income is positive for all agents.
+    bool validate();
 };
 
 #endif //AGENT_H
