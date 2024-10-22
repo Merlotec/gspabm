@@ -350,23 +350,35 @@ namespace peris {
             allocations[b].recalculate_utility();
         }
 
-        // Insert agent a into agent b's position, and shift everything up one.
+        // Moves the agent at index 'a' to index 'b' in the allocations vector,
+        // shifting agents between positions 'b' and 'a-1' up by one position.
+        // This effectively inserts the agent at position 'a' into position 'b',
+        // pushing other agents forward in the vector.
         void displace(size_t a, size_t b) {
-            assert(b < a);
+            assert(b < a); // Ensure that the source index 'a' is greater than the destination index 'b'.
 
-            // Put overridden agent into free agent buffer to be dealt with.
+            // Temporarily store the agent at position 'b' as it will be overridden.
             auto free_agent = allocations[b].agent;
 
+            // Move the agent from position 'a' to position 'b'.
             allocations[b].agent = allocations[a].agent;
-            allocations[b].recalculate_utility();
+            allocations[b].recalculate_utility(); // Update utility after changing the agent.
 
+            // Shift agents from position 'b+1' to 'a' up by one position.
+            // This loop moves each agent into the position of the previous agent.
             for (size_t i = b + 1; i <= a; ++i) {
+                // Store the current agent to be moved in the next iteration.
                 auto agent_buffer = allocations[i].agent;
+
+                // Move the 'free_agent' into the current position.
                 allocations[i].agent = free_agent;
-                allocations[i].recalculate_utility();
+                allocations[i].recalculate_utility(); // Update utility after changing the agent.
+
+                // Update 'free_agent' for the next iteration.
                 free_agent = agent_buffer;
             }
-            // Last agent is agent a which has already been moved to b so we don't need to worry about allocating this free agent.
+            // After the loop, 'free_agent' holds the agent originally at position 'a',
+            // which has already been moved to position 'b', so it can be discarded.
         }
 
     public:
@@ -395,124 +407,129 @@ namespace peris {
             }
         }
 
-        /// Solves the model to a precision of `epsilon`. Draws the progress graphically on the specified window.
-        std::vector<Allocation<A, I> > &solve_visual(sf::RenderWindow &window, float epsilon = 1e-5) {
-            // If there are no agents then they are vacuously solved.
+        /**
+         * Solves the allocation model to achieve Pareto efficiency among agents.
+         * The algorithm assigns items to agents in a way that no agent can be made better off
+         * without making another agent worse off. It iteratively adjusts allocations and prices,
+         * possibly swapping agents to improve overall efficiency.
+         *
+         * The function visualizes the progress by drawing on the specified SFML window.
+         *
+         * @param window The SFML window where the allocation progress is visualized.
+         * @param epsilon The tolerance for numerical approximations (default is 1e-5).
+         * @return A reference to the vector of allocations after solving.
+         */
+        std::vector<Allocation<A, I>>& solve_visual(sf::RenderWindow& window, float epsilon = 1e-5) {
+            // If there are no agents, return the empty allocations vector.
             if (allocations.empty()) {
                 return allocations;
             }
-            // We start by assuming the first agent will get the lowest quality item, since due to the relative nature
-            // of this problem, it necessary for the lowest agent to pay zero (otherwise they could all improve utility
-            // by shifting down, until the lowest agent pays zero, which is the constraint we impose to get absolute
-            // numbers).
-            allocations[0].set_price(0.f);
 
-            // Iterate through the rest of the allocations (from 1 to n). Note: we may need to backtrack to the first agent if the second (or any subsequent agent) should be placed in allocation 0.
-            // TODO: there is a slight worry about a cycle taking place where two allocations keep swapping, if they have very close utility functions, and the error margin of the computational solution results in contradicting comparisons.
+            // Initialize the first allocation:
+            // Assign the first (lowest income) agent to the lowest quality item at zero price.
+            // This sets a baseline, as the lowest agent cannot pay less than zero.
+            allocations[0].set_price(0.0f);
+
+            // Iterate through each agent starting from the second one.
+            // The goal is to assign items to agents in a way that is efficient and respects their preferences.
             for (size_t i = 1; i < allocations.size(); ++i) {
-                // We allocate one agent at a time, iteratively. First, we must check if this agent prefers the (previous) lower agent's allocation (which is designed to be worse for them).
-                // If it is greater, we want to swap this agent with the lower agent. Once we swap, we must continue with this process until it is no longer necessary to swap (so we must check for n-2 as well, and if there is a swap, n-3 etc. etc.)
-                // After a swap, we need to recalculate the allocations for all the newly displaced agents.
+                // Initialize 'agent_to_displace' to -1, indicating no displacement needed initially.
                 ssize_t agent_to_displace = -1;
 
-                Allocation<A, I> &a = allocations[i];
-                Allocation<A, I> &l = allocations[i - 1];
+                // References to the current allocation 'a' and the previous allocation 'l'.
+                Allocation<A, I>& a = allocations[i];     // Current allocation
 
-                // If this condition holds, this agent prefers the lower allocation, and the lower agent prefers this allocation, so they should swap.
-                // In theory this could be removed and the code should still work, but this allows us to avoid the costly operation of calculating if we can clearly see that they should swap.
-                // if (a.agent.utility(l.price + epsilon, l.quality()) > a.utility && l.agent.utility(
-                //         a.price + epsilon, a.quality()) > l.utility) {
-                //     agent_to_displace = i - 1;
-                // }
+                // Determine the 'efficient_price' at which a previous agent 'k' is indifferent
+                // between their own allocation and the current allocation 'a'.
+                float efficient_price;
+                size_t k;             // Index of the agent whose indifference sets the price.
+                size_t next_k = i - 1; // Start with the previous agent.
 
-                if (agent_to_displace == -1) {
-                    // Now we want to find the price that makes the lower agent (i-1) indifferent between choosing their allocation and this new allocation.
-                    float efficient_price;
-                    // Now see if any agents i - 1 or below prefer this allocation to their own.
-                    size_t k;
-                    size_t next_k = i - 1;
-                    // Try with a new k.
-                    do {
-                        k = next_k;
-                        Allocation<A, I> &indiff = allocations[k];
-                        // Assuming well-behaved preferences, the price must be weakly greater than the current price and less than the agent's income.
-                        float max_price = indiff.agent.income() - epsilon;
+                // Loop to find the correct 'k' where earlier agents do not prefer the current allocation.
+                do {
+                    k = next_k;
+                    Allocation<A, I>& indiff = allocations[k];
 
-                        // Function may break down at zero consumption, so we choose a value epsilon away).
-                        efficient_price = indifferent_price(indiff.agent, a.quality(), indiff.utility, indiff.price, max_price,
-                                                                       epsilon);
+                    // The maximum price is limited by the agent's income minus epsilon.
+                    float max_price = indiff.agent.income() - epsilon;
 
-                        // If there is no solution, it is probably because the solution is on the edges of the specified solution range.
-                        if (isnan(efficient_price)) {
-                            // Efficient price must be at boundaries.
-                            const float min_boundary = indiff.agent.utility(indiff.price, a.quality()) - indiff.utility;
-                            const float max_boundary = indiff.agent.utility(max_price, a.quality()) - indiff.utility;
-                            // Check which boundary is closer to the solution.
-                            if (abs(min_boundary) < abs(max_boundary))
-                                efficient_price = indiff.price;
-                            else
-                                efficient_price = max_price;
-                        }
+                    // Find the price that makes agent 'indiff' indifferent between their own allocation
+                    // and the current allocation 'a'. This uses a numerical method of bisection.
+                    efficient_price = indifferent_price(indiff.agent, a.quality(), indiff.utility,
+                                                        indiff.price, max_price, epsilon);
 
-                        for (ssize_t j = k - 1; j >= 0; --j) {
-                            Allocation<A, I> &prev = allocations[j];
-                            // If this other previously allocated agent prefers this allocation over their own then we have a problem.
-                            // We instead want to use this agent as the one who's indifference sets the price of the current allocation i.
-                            if (efficient_price + epsilon < prev.agent.income() && efficient_price + epsilon > prev.price) {
-                                assert(a.quality() >= prev.quality());
-                                if (prev.agent.utility(efficient_price + epsilon, a.quality()) > prev.utility) {
-                                    // Update the indifferent agent to this new agent (which will iterate the while loop again).
-                                    next_k = j;
-                                    break;
-                                }
-                            }
-                        }
-                        // If next_k is set to another element, repeat for that k.
-                    } while (next_k < k);
+                    // Handle cases where no exact solution is found.
+                    if (std::isnan(efficient_price)) {
+                        // Efficient price must be at one of the boundaries (indiff.price or max_price).
+                        const float min_boundary_diff = indiff.agent.utility(indiff.price, a.quality()) - indiff.utility;
+                        const float max_boundary_diff = indiff.agent.utility(max_price, a.quality()) - indiff.utility;
 
-                    // Calculate utility associated with this new 'efficiently' priced allocation.
-                    float efficient_utility = a.agent.utility(efficient_price, a.quality());
-
-                    // If this agent prefers the lower allocation at this 'efficient' price we need to swap.
-                    // Include epsilon here to stop cycles (due to issues in approximating with many agents) since epsilon is the 'worst case' scenario, and if this inequality holds with epsilon then we definitely need to swap.
-                    // If not, then the difference is small enough that the utilities are practically identical.
-                    for (ssize_t j = i - 1; j >= 0; --j) {
-                        Allocation<A, I> &prev = allocations[j];
-                        const float u_prev = a.agent.utility(prev.price + epsilon, prev.quality());
-                        if (u_prev > efficient_utility) {
-                            // We prefer agent j's allocation, so would like to switch.
-                            agent_to_displace = j;
-                        }
+                        // Choose the boundary that is closest to achieving indifference.
+                        if (std::abs(min_boundary_diff) < std::abs(max_boundary_diff))
+                            efficient_price = indiff.price;
+                        else
+                            efficient_price = max_price;
                     }
 
-                    // If we still do not want to swap agents then assign the efficient price. Everything up until now is efficient.
-                    if (agent_to_displace == -1) {
-                        // Set the price to the efficient price corresponding to this agent - it doesn't matter if this agent ends up being swapped.
-                        a.price = efficient_price;
-                        // Rather than calling set price we do it manually since we have already calculated the utility.
-                        a.utility = efficient_utility;
+                    // Check if any earlier agents (from index 0 to k-1) prefer the current allocation at 'efficient_price'.
+                    for (ssize_t j = k - 1; j >= 0; --j) {
+                        Allocation<A, I>& prev = allocations[j];
+
+                        // Ensure that the 'efficient_price' is within the acceptable range for agent 'prev'.
+                        if (efficient_price + epsilon < prev.agent.income() && efficient_price + epsilon > prev.price) {
+                            assert(a.quality() >= prev.quality()); // Quality should be non-decreasing.
+
+                            // If agent 'prev' prefers the current allocation at 'efficient_price' over their own allocation.
+                            if (prev.agent.utility(efficient_price + epsilon, a.quality()) > prev.utility) {
+                                // Update 'next_k' to 'j' to consider this agent in the next iteration.
+                                next_k = j;
+                                break; // Exit the inner loop to update 'k'.
+                            }
+                        }
+                    }
+                    // Repeat the loop if 'next_k' has been updated to an earlier agent.
+                } while (next_k < k);
+
+                // Calculate the utility of the current agent 'a' at the 'efficient_price'.
+                float efficient_utility = a.agent.utility(efficient_price, a.quality());
+
+                // Check if the current agent 'a' prefers any of the previous allocations over their own at 'efficient_price'.
+                // If so, mark the agent to displace.
+                for (ssize_t j = i - 1; j >= 0; --j) {
+                    const Allocation<A, I>& prev = allocations[j];
+                    if (a.agent.utility(prev.price + epsilon, prev.quality()) > efficient_utility) {
+                        // The current agent 'a' prefers 'prev''s allocation; mark 'prev' as the agent to displace.
+                        agent_to_displace = j;
                     }
                 }
 
-                if (agent_to_displace >= 0) {
-                    assert(agent_to_displace < i); // Should only swap down.
+                // If no displacement is needed, update the current allocation's price and utility.
+                if (agent_to_displace == -1) {
+                    // Set the price to the 'efficient_price' and update utility for the current allocation.
+                    a.price = efficient_price;
+                    a.utility = efficient_utility;
+                }
 
-                    // Swap agents.
+                if (agent_to_displace >= 0) {
+                    assert(agent_to_displace < i); // The agent to displace should be at a lower index.
+
+                    // Displace the current agent 'a' to position 'agent_to_displace', shifting other agents accordingly.
                     displace(i, agent_to_displace);
 
-                    // Because we have moved the current agent to the previous agent, but we now need to check if it should be moved back even further or ensure that the price is efficient for that new agent.
+                    // After displacement, we need to revisit allocations to ensure efficiency.
+                    // Adjust 'i' to continue checking from the appropriate position.
                     if (agent_to_displace == 0) {
-                        // Will hit zero so we cannot push this agent further back, or adjust the price of the allocation 0, so we want to only recalculate the agent now allocated to 1.
-                        // This will keep i the same for the next iteration but will operate on a different agent because of the swap.
+                        // If displaced to the first position, reset 'i' to 0 to start over.
                         i = 0;
                     } else {
-                        // This means that the next iteration will be i = i-1 (since it is incremented by 1 by the for loop).
+                        // Set 'i' to 'agent_to_displace - 1' because the for-loop will increment 'i' next.
                         i = agent_to_displace - 1;
                     }
                 }
 
-                // Draw the current state of the world to see progress.
+                // Draw the current state of allocations on the window for visualization.
                 if (!draw(window)) {
+                    // If the window is closed or drawing fails, return the current allocations.
                     return allocations;
                 }
             }
