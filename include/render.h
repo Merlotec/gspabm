@@ -418,7 +418,7 @@ namespace peris {
             const auto& a = new_allocations[hovered_allocation_index];
 
             std::ostringstream info;
-            info << "p=" << a.price << "\ne=" << a.item.quality() << "\n" << a.agent.debug_info();
+            info << "i=" << hovered_allocation_index << "\np=" << a.price << "\ne=" << a.item.quality() << "\nu=" << a.agent.utility(a.price, a.item.quality()) << "\nu_old=" << a.utility << "\n" << a.agent.debug_info();
             sf::Text agent_info(info.str(), font, 14);
             agent_info.setFillColor(sf::Color::Black);
             agent_info.setPosition(mouse_position.x + 10, mouse_position.y + 10);

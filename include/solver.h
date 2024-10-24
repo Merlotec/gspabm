@@ -111,7 +111,7 @@ namespace peris {
          * @param epsilon The tolerance for numerical approximations (default is 1e-5).
          * @return A reference to the vector of allocations after solving.
          */
-        std::vector<Allocation<A, I>>& solve(RenderState<A, I>* render_state, float epsilon = 1e-5) {
+        std::vector<Allocation<A, I>>& solve(RenderState<A, I>* render_state, float epsilon = 1e-6, int max_iter = 300) {
             // If there are no agents, return the empty allocations vector.
             if (allocations.empty()) {
                 return allocations;
@@ -148,8 +148,9 @@ namespace peris {
 
                     // Find the price that makes agent 'indiff' indifferent between their own allocation
                     // and the current allocation 'a'. This uses a numerical method of bisection.
+                    float min_price = indiff.price == 0 ? epsilon : indiff.price;
                     efficient_price = indifferent_price(indiff.agent, a.quality(), indiff.utility,
-                                                        indiff.price, max_price, epsilon);
+                                                        min_price, max_price, epsilon, max_iter);
 
                     // Handle cases where no exact solution is found.
                     if (std::isnan(efficient_price)) {
@@ -169,11 +170,11 @@ namespace peris {
                         Allocation<A, I>& prev = allocations[j];
 
                         // Ensure that the 'efficient_price' is within the acceptable range for agent 'prev'.
-                        if (efficient_price + epsilon < prev.agent.income() && efficient_price + epsilon > prev.price) {
+                        if (efficient_price < prev.agent.income()) {
                             assert(a.quality() >= prev.quality()); // Quality should be non-decreasing.
 
                             // If agent 'prev' prefers the current allocation at 'efficient_price' over their own allocation.
-                            if (prev.agent.utility(efficient_price + epsilon, a.quality()) > prev.utility) {
+                            if (prev.agent.utility(efficient_price, a.quality()) > prev.utility) {
                                 // Update 'next_k' to 'j' to consider this agent in the next iteration.
                                 next_k = j;
                                 break; // Exit the inner loop to update 'k'.
@@ -194,10 +195,10 @@ namespace peris {
 
                     // Check if the current agent 'a' prefers any of the previous allocations over their own at 'efficient_price'.
                     // If so, mark the agent to displace.
-                    float u_max = efficient_utility;
+                    float u_max = a.agent.utility(efficient_price - epsilon, a.quality());
                     for (ssize_t j = i - 1; j >= 0; --j) {
                         const Allocation<A, I>& prev = allocations[j];
-                        float u_prev = a.agent.utility(prev.price + 100.f * epsilon, prev.quality());
+                        float u_prev = a.agent.utility(prev.price + epsilon, prev.quality());
                         if (u_prev > u_max) {
                             // The current agent 'a' prefers 'prev''s allocation; mark 'prev' as the agent to displace.
                             u_max = u_prev;
