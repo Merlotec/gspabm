@@ -15,7 +15,7 @@ typedef long int ssize_t;
 #endif
 
 namespace peris {
-    enum SolutionResult {
+    enum SolutionResult : int {
         err_budget_constraint = -3,
         err_nan = -2,
         err_unknown = -1,
@@ -174,33 +174,6 @@ namespace peris {
                 return pres;
             }
 
-            // bool misaligned = true;
-            // while (misaligned) {
-            //     // Now we have a set of allocations aligned by the previous allocation.
-            //     // However, we might not have an efficient outcome due to further back indifference curves crossing over the previous curves.
-            //     // Thus we need to 'push' some allocations outwards until this no longer happens.
-            //
-            //
-            //     misaligned = false;
-            //
-            //     // // So now we have an allocation, but it may be outside some agent's budget constraints. If there is such an agent, we must adjust.
-            //     // for (size_t i = 0; i < allocations.size(); ++i) {
-            //     //     if (allocations[i].agent.income() < allocations[i].price) {
-            //     //         // Invalid allocation: move to most preferred.
-            //     //         size_t new_i = most_preferred(i, epsilon);
-            //     //         assert(new_i < i);
-            //     //         displace_up(i, new_i);
-            //     //         misaligned = true; // Tell the loop to execute again.
-            //     //         std::cout << "Misaligned " << i << ", moving to " << new_i << std::endl;
-            //     //         if (!align(render_state, new_i, epsilon, max_iter)) {
-            //     //             // Exit command.
-            //     //             return allocations;
-            //     //         }
-            //     //         break; // If we do more than one, we might cause issues, because simultaneously it is not true that the most preferred is the same with the other changes.
-            //     //     }
-            //     // }
-            // }
-
             return SolutionResult::success;
         }
 
@@ -261,18 +234,6 @@ namespace peris {
                 float efficient_price = indifferent_price(l.agent, a.quality(), l.utility,
                                                     min_price, max_price, epsilon, max_iter);
 
-                // Handle cases where no exact solution is found.
-                // if (std::isnan(efficient_price)) {
-                //     // Efficient price must be at one of the boundaries (indiff.price or max_price).
-                //     const float min_boundary_diff = l.agent.utility(l.price, a.quality()) - l.utility;
-                //     const float max_boundary_diff = l.agent.utility(max_price, a.quality()) - l.utility;
-                //
-                //     // Choose the boundary that is closest to achieving indifference.
-                //     if (std::abs(min_boundary_diff) < std::abs(max_boundary_diff))
-                //         efficient_price = l.price;
-                //     else
-                //         efficient_price = max_price;
-                // }
                 if (efficient_price > a.agent.income()) {
                     // Find best place to move agent to.
                     size_t new_i = most_preferred(i, epsilon);
@@ -282,25 +243,6 @@ namespace peris {
                 if (agent_to_displace == -1) {
                     if (isnan(efficient_price))
                         return SolutionResult::err_nan;
-
-                    // Check if any earlier agents (from index 0 to k-1) prefer the current allocation at 'efficient_price'.
-                    // If they do, we should promote them.
-                    // for (ssize_t j = i - 2; j >= 0; --j) {
-                    //     Allocation<A, I>& prev = allocations[j];
-                    //
-                    //     // Ensure that the 'efficient_price' is within the acceptable range for agent 'prev'.
-                    //     if (efficient_price < prev.agent.income()) {
-                    //         assert(a.quality() >= prev.quality()); // Quality should be non-decreasing.
-                    //
-                    //         // If agent 'prev' prefers the current allocation at 'efficient_price' over their own allocation.
-                    //         const float u_alt = prev.agent.utility(efficient_price + 10.f * epsilon, a.quality());
-                    //         if (u_alt > prev.utility) {
-                    //             // Shift this previous agent up to i+1, since we know it goes through this point with a gradient lower than our current indifference curve.
-                    //             agents_to_promote.push_back(j);
-                    //         }
-                    //     }
-                    // }
-
 
                     // Find the existing agent that gives this agent highest utility and switch.
                     // Calculate the utility of the current agent 'a' at the 'efficient_price'.
@@ -383,7 +325,7 @@ namespace peris {
                             // Update 'next_k' to 'j' to consider this agent in the next iteration.
                             // The maximum price is limited by the agent's income minus epsilon.
                             float max_price = other.agent.income() - epsilon;
-                            float min_price = other.price == 0 ? epsilon : other.price - epsilon;
+                            float min_price = other.price == epsilon;
 
                             float new_price = indifferent_price(other.agent, a.quality(), other.utility, min_price, max_price, epsilon, max_iter);
                             if (isnan(new_price)) {
@@ -407,9 +349,9 @@ namespace peris {
             }
 
             if (updated > 0) {
-                SolutionResult::repeat;
+                return SolutionResult::repeat;
             } else {
-                SolutionResult::success;
+                return SolutionResult::success;
             }
         }
     public:
