@@ -27,15 +27,13 @@ World create_world(const size_t school_count, const size_t house_count) {
     std::random_device rd;
     std::mt19937 gen(rd());
 
-
-
     std::normal_distribution<float> school_quality_distribution(0.8, 0.2);
     std::normal_distribution<float> ability_distribution(0, 1.0);
     std::normal_distribution<float> aspiration_distribution(0.55, 0.1);
 
-    constexpr float mean_household_inc = 100.0;
+    constexpr float mean_household_inc = 120.0;
 
-    float cv = 0.15; // Adjusts skewness of distribution
+    float cv = 0.3; // Adjusts variance and skewness of distribution
     float variance = (cv * mean_household_inc) * (cv * mean_household_inc);
     float standard_deviation = std::sqrt(variance);
 
@@ -190,8 +188,8 @@ __global__ void determine_bids(Household* households, int household_count, Schoo
 }
 
 int main() {
-    constexpr size_t school_count = 70;
-    constexpr size_t house_count = 70;
+    constexpr size_t school_count = 100;
+    constexpr size_t house_count = 100;
 
     std::cout << "Creating with " << school_count << " schools" << " and " << house_count << " houses" << std::endl;
 
@@ -208,7 +206,15 @@ int main() {
 
     solver.draw(&render_state);
 
-    solver.solve(&render_state);
+    auto pres = solver.solve(&render_state);
+
+    std::cout << "Solver finished with code " << pres << std::endl;
+
+    if (solver.verify_solution(0.001)) {
+        std::cout << "Verification successful" << std::endl;
+    } else {
+        std::cout << "Verification failed!" << std::endl;
+    }
 
     // Run regression to calculate gsp:
 

@@ -117,9 +117,22 @@ namespace peris {
     inline void RenderState<A, I>::compute_coordinate_transformations(const std::vector<peris::Allocation<A, I>>& allocations) {
         // Compute bounds based on allocations
         x_min_base = 0.f;
-        x_max_base = allocations.back().price * 1.1f;
+        x_max_base = allocations.back().price;
         y_min_base = 0.f;
-        y_max_base = allocations.back().quality() * 1.1f;
+        y_max_base = allocations.back().quality();
+
+        for (auto& a : allocations) {
+            float x = a.price;
+            float y = a.quality();
+
+            if (x > x_max_base) {
+                x_max_base = x;
+            }
+
+            if (y > y_max_base) {
+                y_max_base = y;
+            }
+        }
 
         // Add padding
         float x_padding = std::abs(x_max_base - x_min_base) * 0.1f;
