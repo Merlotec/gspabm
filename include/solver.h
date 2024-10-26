@@ -91,7 +91,7 @@ namespace peris {
 
             // Shift agents from position 'b+1' to 'a' up by one position.
             // This loop moves each agent into the position of the previous agent.
-            for (ssize_t i = b - 1; i >= a; --i) {
+            for (ssize_t i = b - 1; i >= (ssize_t)a; --i) {
                 // Store the current agent to be moved in the next iteration.
                 auto agent_buffer = allocations[i].agent;
 
@@ -217,6 +217,7 @@ namespace peris {
             for (;i < allocations.size(); ++i) {
                 // Initialize 'agent_to_displace' to -1, indicating no displacement needed initially.
                 ssize_t agent_to_displace = -1;
+                ssize_t agent_to_promote = -1;
 
                 // References to the current allocation 'a' and the previous allocation 'l'.
                 Allocation<A, I>& a = allocations[i];     // Current allocation
@@ -250,7 +251,7 @@ namespace peris {
                     if (isnan(efficient_utility))
                         return SolutionResult::err_nan;
 
-                    // Check if any previous agent prefers this allocation. If so, move to the max.
+                    // Check if this agent prefers any previous allocations.
                     float u_max = a.agent.utility(efficient_price - 100.f * epsilon, a.quality());
 
                     if (isnan(u_max))
@@ -258,6 +259,7 @@ namespace peris {
 
                     for (ssize_t j = i - 1; j >= 0; --j) {
                         const Allocation<A, I>& prev = allocations[j];
+
                         if (a.agent.income() > prev.price + epsilon) {
                             float u_prev = a.agent.utility(prev.price + 100.f * epsilon, prev.quality());
                             if (isnan(u_prev))
@@ -266,6 +268,17 @@ namespace peris {
                                 // The current agent 'a' prefers 'prev''s allocation; mark 'prev' as the agent to displace.
                                 u_max = u_prev;
                                 agent_to_displace = j;
+                            }
+                        }
+
+                        // Check if this other agent prefers this allocation.
+                        // Do not care about previous agent because we expect their utility to be the same due to the indifference condition.
+                        if (prev.agent.income() > efficient_price) {
+                            if (j < i - 1 && prev.agent.utility(efficient_price + epsilon, a.quality()) > prev.utility) {
+                                // Shift that agent to here and recalculate.
+                                // We will have to invalidate previous allocations due to this.
+                                agent_to_promote = j;
+                                break;
                             }
                         }
                     }
@@ -280,12 +293,17 @@ namespace peris {
                 }
 
                 if (agent_to_displace >= 0) {
-                    assert(agent_to_displace < i); // The agent to displace should be at a lower index.
+                    // Only promote if we also need to displace, otherwise there is no need.
+                    if (agent_to_promote >= 0) {
+                        displace_down(agent_to_promote, i);
+                        i = max(agent_to_promote - 1L, 0L);
+                    } else {
+                        assert(agent_to_displace < i); // The agent to displace should be at a lower index.
 
-                    // Displace the current agent 'a' to position 'agent_to_displace', shifting other agents accordingly.
-                    displace_up(i, agent_to_displace);
-                    i = max(agent_to_displace - 1L, 0L);
-
+                        // Displace the current agent 'a' to position 'agent_to_displace', shifting other agents accordingly.
+                        displace_up(i, agent_to_displace);
+                        i = max(agent_to_displace - 1L, 0L);
+                    }
                 }
 
                 if (render_state != nullptr) {
