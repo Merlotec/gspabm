@@ -16,6 +16,8 @@
 typedef long int ssize_t;
 #endif
 
+#define BUFFER_MARGIN_FACTOR 10.f
+
 namespace peris {
 
     /// Enumeration of possible results from the solver functions
@@ -131,6 +133,23 @@ namespace peris {
             }
             // After the loop, 'free_agent' holds the agent originally at position 'a',
             // which has already been moved to position 'b', so it can be discarded.
+        }
+
+        double calculate_efficient_price(const Allocation<A, I> &l, const Allocation<A, I> &a, const double epsilon, const int max_iter) {
+
+            double max_price = l.agent.income() - epsilon;
+            double min_price = l.price == 0 ? epsilon : l.price - epsilon;
+
+            double efficient_price = indifferent_price(l.agent, a.quality(), l.utility,
+                                                min_price, max_price, epsilon, max_iter);
+
+            if (isnan(efficient_price)) {
+                // If unable to compute efficient price, use max price if it improves utility
+                if (l.agent.utility(max_price, a.quality()) > l.utility) {
+                    efficient_price = max_price;
+                }
+            }
+            return efficient_price;
         }
 
     public:
@@ -264,20 +283,30 @@ namespace peris {
         SolutionResult align(RenderState<A, I>* render_state, size_t i, double epsilon, int max_iter = 100) {
             // Initialize the first allocation if starting from index 0
             if (i == 0) {
-                // Set the price of the first allocation to zero
+                // Set the price of the first allocation to zero.
+                // This essentially 'anchors' the algorithm so that all other allocations can be distributed around this value.
                 allocations[0].set_price(0.0f);
+
+                // We have allocated agent 0 so we can start at agent 1.
                 i = 1;
             }
 
+            // Keeps track of the highest index that has so far been reached.
+            // This is used for rendering so that we only re-render when the next allocation has been reached.
             size_t head = i;
-            size_t reserve = 0;
-            bool in_reserve = false;
 
             // Iterate through each agent starting from index i
-            for (; i < allocations.size(); ++i) {
-                if (i >= allocations.size() - reserve) {
-                    in_reserve = true;
+            while (i < allocations.size()) {
+                // Visualization code if render_state is provided
+                if (render_state != nullptr) {
+                    if (i > head) {
+                        if (!render_state->draw_allocations(this->allocations, i)) {
+                            return SolutionResult::terminated;
+                        }
+                    }
                 }
+                head = max(i, head);
+
                 // Initialize variables to keep track of agents to displace or promote
                 ssize_t agent_to_displace = -1;
                 ssize_t agent_to_promote = -1;
@@ -285,21 +314,7 @@ namespace peris {
                 Allocation<A, I>& a = allocations[i];     // Current allocation
                 Allocation<A, I>& l = allocations[i - 1]; // Previous allocation
 
-                // Compute the efficient price where the previous agent is indifferent between their own allocation and the current one
-                double max_price = l.agent.income() - epsilon;
-                double min_price = l.price == 0 ? epsilon : l.price - epsilon;
-
-                double efficient_price = indifferent_price(l.agent, a.quality(), l.utility,
-                                                    min_price, max_price, epsilon, max_iter);
-
-                if (isnan(efficient_price)) {
-                    // If unable to compute efficient price, use max price if it improves utility
-                    if (l.agent.utility(max_price, a.quality()) > l.utility) {
-                        efficient_price = max_price;
-                    } else {
-                        return SolutionResult::err_nan;
-                    }
-                }
+                double efficient_price = calculate_efficient_price(l, a, epsilon, max_iter);
 
                 // Check if the efficient price exceeds the current agent's income
                 if (efficient_price + epsilon > a.agent.income()) {
@@ -317,7 +332,24 @@ namespace peris {
 
                     for (ssize_t j = i - 1; j >= 0; --j) {
                         const Allocation<A, I>& prev = allocations[j];
+                        // Check if the previous agent prefers the current allocation at efficient price
+                        if (prev.agent.income() > efficient_price) {
+                            if (j < i - 1 && prev.agent.utility(efficient_price + epsilon, a.quality()) > prev.utility) {
+                                // Mark this agent to promote
+                                agent_to_promote = j;
 
+                                // Calculate the new efficient price by making this 'prev' agent indifferent.
+                                double new_price = calculate_efficient_price(prev, a, epsilon, max_iter);
+
+                                if (new_price > efficient_price) {
+                                    efficient_price = new_price;
+                                }
+                            }
+                        }
+                    }
+
+                    for (ssize_t j = i - 1; j >= 0; --j) {
+                        const Allocation<A, I>& prev = allocations[j];
                         // Check if the agent can afford the previous allocation
                         if (a.agent.income() > prev.price + epsilon) {
                             double u_prev = a.agent.utility(prev.price + 100.f * epsilon, prev.quality());
@@ -327,24 +359,6 @@ namespace peris {
                                 // The current agent 'a' prefers 'prev''s allocation; mark 'prev' as the agent to displace.
                                 u_max = u_prev;
                                 agent_to_displace = j;
-                            }
-                        }
-
-                        // Check if the previous agent prefers the current allocation at efficient price
-                        if (prev.agent.income() > efficient_price) {
-                            if (j < i - 1 && prev.agent.utility(efficient_price + epsilon, a.quality()) > prev.utility) {
-                                // Mark this agent to promote
-                                agent_to_promote = j;
-
-                                // Update the price to reflect this - this will only be used if we do not promote.
-                                double max_price = prev.agent.income() - epsilon;
-                                double min_price = prev.price == 0 ? epsilon : prev.price - epsilon;
-                                double p_doublecross = indifferent_price(prev.agent, a.quality(), prev.utility,
-                                                    min_price, max_price, epsilon, max_iter);
-
-                                if (p_doublecross > efficient_price) {
-                                    efficient_price = p_doublecross;
-                                }
                             }
                         }
                     }
@@ -372,26 +386,18 @@ namespace peris {
                     if (agent_to_promote >= 0) {
                         // Displace the agent to the reserve area
                         displace_down(agent_to_promote, allocations.size() - 1);
-                        ++reserve;
-                        i = max(agent_to_promote - 1L, 0L);
+                        i = max(agent_to_promote, 1L);
                     } else {
                         assert(agent_to_displace < i); // The agent to displace should be at a lower index.
 
                         // Displace the current agent 'a' to position 'agent_to_displace', shifting other agents accordingly.
                         displace_up(i, agent_to_displace);
-                        i = max(agent_to_displace - 1L, 0L);
+                        i = max(agent_to_displace, 1L);
                     }
+                } else {
+                    // The current allocation is successful, so we can move on to the next one.
+                    ++i;
                 }
-
-                // Visualization code if render_state is provided
-                if (render_state != nullptr) {
-                    if (i > head) {
-                        if (!render_state->draw_allocations(this->allocations, i)) {
-                            return SolutionResult::terminated;
-                        }
-                    }
-                }
-                head = max(i, head);
             }
             return SolutionResult::success;
         }
