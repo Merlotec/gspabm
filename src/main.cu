@@ -188,8 +188,8 @@ __global__ void determine_bids(Household* households, int household_count, Schoo
 }
 
 int main() {
-    constexpr size_t school_count = 100;
-    constexpr size_t house_count = 100;
+    constexpr size_t school_count = 150;
+    constexpr size_t house_count = 150;
 
     std::cout << "Creating with " << school_count << " schools" << " and " << house_count << " houses" << std::endl;
 

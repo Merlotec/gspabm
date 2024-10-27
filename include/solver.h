@@ -324,17 +324,12 @@ namespace peris {
                 }
 
                 if (agent_to_displace == -1) {
-                    // Check if this agent prefers any previous allocations
-                    double u_max = a.agent.utility(efficient_price - 100.f * epsilon, a.quality());
-
-                    if (isnan(u_max))
-                        return SolutionResult::err_nan;
 
                     for (ssize_t j = i - 1; j >= 0; --j) {
                         const Allocation<A, I>& prev = allocations[j];
                         // Check if the previous agent prefers the current allocation at efficient price
                         if (prev.agent.income() > efficient_price) {
-                            if (j < i - 1 && prev.agent.utility(efficient_price + epsilon, a.quality()) > prev.utility) {
+                            if (j < i - 1 && prev.agent.utility(efficient_price, a.quality()) > prev.utility + epsilon) {
                                 // Mark this agent to promote
                                 agent_to_promote = j;
 
@@ -348,35 +343,49 @@ namespace peris {
                         }
                     }
 
-                    for (ssize_t j = i - 1; j >= 0; --j) {
-                        const Allocation<A, I>& prev = allocations[j];
-                        // Check if the agent can afford the previous allocation
-                        if (a.agent.income() > prev.price + epsilon) {
-                            double u_prev = a.agent.utility(prev.price + 100.f * epsilon, prev.quality());
-                            if (isnan(u_prev))
-                                return SolutionResult::err_nan;
-                            if (u_prev > u_max) {
-                                // The current agent 'a' prefers 'prev''s allocation; mark 'prev' as the agent to displace.
-                                u_max = u_prev;
-                                agent_to_displace = j;
-                            }
-                        }
+                    // Check if the efficient price exceeds the current agent's income
+                    if (efficient_price + epsilon > a.agent.income()) {
+                        // Find the most preferred allocation for the current agent among those below
+                        size_t new_i = most_preferred(i, false, epsilon); // Do not search above because not yet allocated.
+                        agent_to_displace = new_i;
                     }
 
-                    // If no displacement is needed, update the current allocation's price and utility.
                     if (agent_to_displace == -1) {
-                        if (efficient_price + epsilon > a.agent.income()) {
-                            // Find best place to move agent to.
-                            size_t new_i = most_preferred(i, false, epsilon); // Do not search above because not yet allocated.
-                            agent_to_displace = new_i;
-                        } else {
-                            // Update the allocation with the efficient price and utility
-                            double efficient_utility = a.agent.utility(efficient_price, a.quality());
-                            if (isnan(efficient_utility))
-                                return SolutionResult::err_nan;
+                        // Check if this agent prefers any previous allocations
+                        double u_max = a.agent.utility(efficient_price, a.quality());
 
-                            a.price = efficient_price;
-                            a.utility = efficient_utility;
+                        if (isnan(u_max))
+                            return SolutionResult::err_nan;
+                        for (ssize_t j = i - 1; j >= 0; --j) {
+                            const Allocation<A, I>& prev = allocations[j];
+                            // Check if the agent can afford the previous allocation
+                            if (a.agent.income() > prev.price + epsilon) {
+                                double u_prev = a.agent.utility(prev.price, prev.quality());
+                                if (isnan(u_prev))
+                                    return SolutionResult::err_nan;
+                                if (u_prev > u_max + epsilon) {
+                                    // The current agent 'a' prefers 'prev''s allocation; mark 'prev' as the agent to displace.
+                                    u_max = u_prev;
+                                    agent_to_displace = j;
+                                }
+                            }
+                        }
+
+                        // If no displacement is needed, update the current allocation's price and utility.
+                        if (agent_to_displace == -1) {
+                            if (efficient_price + epsilon > a.agent.income()) {
+                                // Find best place to move agent to.
+                                size_t new_i = most_preferred(i, false, epsilon); // Do not search above because not yet allocated.
+                                agent_to_displace = new_i;
+                            } else {
+                                // Update the allocation with the efficient price and utility
+                                double efficient_utility = a.agent.utility(efficient_price, a.quality());
+                                if (isnan(efficient_utility))
+                                    return SolutionResult::err_nan;
+
+                                a.price = efficient_price;
+                                a.utility = efficient_utility;
+                            }
                         }
                     }
                 }
@@ -432,7 +441,7 @@ namespace peris {
                     // Ensure that 'other' can afford the current allocation
                     if (efficient_price + epsilon < other.agent.income()) {
                         // If agent 'other' prefers the current allocation at 'efficient_price'
-                        if (other.agent.utility(efficient_price + epsilon, a.quality()) > other.utility) {
+                        if (other.agent.utility(efficient_price, a.quality()) > other.utility + epsilon) {
                             // Update the efficient price to prevent 'other' from preferring it
                             double max_price = other.agent.income() - epsilon;
                             double min_price = other.price == epsilon;
@@ -454,7 +463,7 @@ namespace peris {
                 // Update to reflect new efficient price
                 if (efficient_price > a.price + epsilon) {
                     // Update efficient price and utility
-                    if (efficient_price > a.agent.income()) {
+                    if (efficient_price + epsilon > a.agent.income()) {
                         return SolutionResult::err_budget_constraint;
                     }
                     a.set_price(efficient_price);
