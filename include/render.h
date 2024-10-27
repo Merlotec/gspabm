@@ -49,12 +49,12 @@ namespace peris {
         std::vector<sf::Text> tick_labels;
 
         // Coordinate transformations
-        float x_min, x_max, y_min, y_max;
-        float x_min_base, x_max_base, y_min_base, y_max_base;
-        float x_scale, y_scale;
-        float x_axis_y, y_axis_x;
+        double x_min, x_max, y_min, y_max;
+        double x_min_base, x_max_base, y_min_base, y_max_base;
+        double x_scale, y_scale;
+        double x_axis_y, y_axis_x;
 
-        float epsilon = 1e-4;
+        double epsilon = 1e-4;
 
         // Store previous allocations for comparison
         std::vector<peris::Allocation<A, I>> old_allocations;
@@ -82,28 +82,28 @@ namespace peris {
             // Indifference Curve
             sf::VertexArray curve(sf::LineStrip);
 
-            for (float x = x_min; x <= a.agent.income(); x += 0.05f) {
+            for (double x = x_min; x <= a.agent.income(); x += 0.05f) {
 
-                float x_use;
+                double x_use;
                 if (x > a.agent.income()) {
                      x_use = a.agent.income() - epsilon;
                 } else {
                     x_use = x;
                 }
 
-                float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
+                double y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
 
                 if (!std::isnan(y) && y >= y_min && y <= y_max) {
-                    float screen_x = (x - x_min) * x_scale;
-                    float screen_y = window.getSize().y - (y - y_min) * y_scale;
+                    double screen_x = (x - x_min) * x_scale;
+                    double screen_y = window.getSize().y - (y - y_min) * y_scale;
                     curve.append(sf::Vertex(sf::Vector2f(screen_x, screen_y), sf::Color::Red));
                 }
             }
             indifference_curves.push_back(curve);
 
             // Allocation Circle
-            float screen_x = (a.price - x_min) * x_scale;
-            float screen_y = window.getSize().y - (a.quality() - y_min) * y_scale;
+            double screen_x = (a.price - x_min) * x_scale;
+            double screen_y = window.getSize().y - (a.quality() - y_min) * y_scale;
 
             sf::CircleShape circle(5);
             circle.setFillColor(sf::Color::Blue);
@@ -122,8 +122,8 @@ namespace peris {
         y_max_base = allocations.back().quality();
 
         for (auto& a : allocations) {
-            float x = a.price;
-            float y = a.quality();
+            double x = a.price;
+            double y = a.quality();
 
             if (x > x_max_base) {
                 x_max_base = x;
@@ -135,8 +135,8 @@ namespace peris {
         }
 
         // Add padding
-        float x_padding = std::abs(x_max_base - x_min_base) * 0.1f;
-        float y_padding = std::abs(y_max_base - y_min_base) * 0.05f;
+        double x_padding = std::abs(x_max_base - x_min_base) * 0.1f;
+        double y_padding = std::abs(y_max_base - y_min_base) * 0.05f;
 
         x_min = x_min_base - x_padding;
         y_min = y_min_base - y_padding;
@@ -181,11 +181,11 @@ namespace peris {
         axis_labels.push_back(y_label);
 
         // Helper function to calculate 'nice' numbers for intervals
-        auto calculate_nice_number = [](float range, bool round) {
-            float exponent = std::floor(std::log10(range));
-            float fraction = range / std::pow(10, exponent);
+        auto calculate_nice_number = [](double range, bool round) {
+            double exponent = std::floor(std::log10(range));
+            double fraction = range / std::pow(10, exponent);
 
-            float nice_fraction;
+            double nice_fraction;
             if (round) {
                 if (fraction < 1.5f)
                     nice_fraction = 1.0f;
@@ -215,13 +215,13 @@ namespace peris {
 
         // X-axis ticks
         int desired_x_ticks = 5;
-        float x_range = x_max - x_min;
-        float x_tick_interval = calculate_nice_number(x_range / (desired_x_ticks - 1), true);
-        float x_nice_min = std::floor(x_min / x_tick_interval) * x_tick_interval;
-        float x_nice_max = std::ceil(x_max / x_tick_interval) * x_tick_interval;
+        double x_range = x_max - x_min;
+        double x_tick_interval = calculate_nice_number(x_range / (desired_x_ticks - 1), true);
+        double x_nice_min = std::floor(x_min / x_tick_interval) * x_tick_interval;
+        double x_nice_max = std::ceil(x_max / x_tick_interval) * x_tick_interval;
 
-        for (float x_value = x_nice_min; x_value <= x_nice_max; x_value += x_tick_interval) {
-            float screen_x = (x_value - x_min) * x_scale;
+        for (double x_value = x_nice_min; x_value <= x_nice_max; x_value += x_tick_interval) {
+            double screen_x = (x_value - x_min) * x_scale;
 
             // Tick marks
             sf::VertexArray tick(sf::Lines, 2);
@@ -240,13 +240,13 @@ namespace peris {
 
         // Y-axis ticks
         int desired_y_ticks = 5;
-        float y_range = y_max - y_min;
-        float y_tick_interval = calculate_nice_number(y_range / (desired_y_ticks - 1), true);
-        float y_nice_min = std::floor(y_min / y_tick_interval) * y_tick_interval;
-        float y_nice_max = std::ceil(y_max / y_tick_interval) * y_tick_interval;
+        double y_range = y_max - y_min;
+        double y_tick_interval = calculate_nice_number(y_range / (desired_y_ticks - 1), true);
+        double y_nice_min = std::floor(y_min / y_tick_interval) * y_tick_interval;
+        double y_nice_max = std::ceil(y_max / y_tick_interval) * y_tick_interval;
 
-        for (float y_value = y_nice_min; y_value <= y_nice_max; y_value += y_tick_interval) {
-            float screen_y = window.getSize().y - (y_value - y_min) * y_scale;
+        for (double y_value = y_nice_min; y_value <= y_nice_max; y_value += y_tick_interval) {
+            double screen_y = window.getSize().y - (y_value - y_min) * y_scale;
 
             // Tick marks
             sf::VertexArray tick(sf::Lines, 2);
@@ -283,27 +283,27 @@ namespace peris {
                 // Indifference Curve
                 sf::VertexArray curve(sf::LineStrip);
 
-                for (float x = x_min; x <= x_max; x += 0.05f) {
-                    float x_use;
+                for (double x = x_min; x <= x_max; x += 0.05f) {
+                    double x_use;
                     if (x > a.agent.income()) {
                         x_use = a.agent.income() - epsilon;
                     } else {
                         x_use = x;
                     }
 
-                    float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
+                    double y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
 
                     if (!std::isnan(y) && y >= y_min && y <= y_max) {
-                        float screen_x = (x - x_min) * x_scale;
-                        float screen_y = window.getSize().y - (y - y_min) * y_scale;
+                        double screen_x = (x - x_min) * x_scale;
+                        double screen_y = window.getSize().y - (y - y_min) * y_scale;
                         curve.append(sf::Vertex(sf::Vector2f(screen_x, screen_y), sf::Color::Red));
                     }
                 }
                 indifference_curves.push_back(curve);
 
                 // Allocation Circle
-                float screen_x = (a.price - x_min) * x_scale;
-                float screen_y = window.getSize().y - (a.quality() - y_min) * y_scale;
+                double screen_x = (a.price - x_min) * x_scale;
+                double screen_y = window.getSize().y - (a.quality() - y_min) * y_scale;
 
                 sf::CircleShape circle(5);
                 circle.setFillColor(sf::Color::Blue);
@@ -326,27 +326,27 @@ namespace peris {
             sf::VertexArray curve(sf::LineStrip);
 
             const auto& a = new_alloc;
-            for (float x = x_min; x <= x_max; x += 0.05f) {
-                float x_use;
+            for (double x = x_min; x <= x_max; x += 0.05f) {
+                double x_use;
                 if (x > a.agent.income()) {
                     x_use = a.agent.income() - epsilon;
                 } else {
                     x_use = x;
                 }
 
-                float y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
+                double y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
 
                 if (!std::isnan(y) && y >= y_min && y <= y_max) {
-                    float screen_x = (x - x_min) * x_scale;
-                    float screen_y = window.getSize().y - (y - y_min) * y_scale;
+                    double screen_x = (x - x_min) * x_scale;
+                    double screen_y = window.getSize().y - (y - y_min) * y_scale;
                     curve.append(sf::Vertex(sf::Vector2f(screen_x, screen_y), sf::Color::Red));
                 }
             }
             indifference_curves[i] = curve;
 
             // Recompute allocation circle
-            float screen_x = (new_alloc.price - x_min) * x_scale;
-            float screen_y = window.getSize().y - (new_alloc.quality() - y_min) * y_scale;
+            double screen_x = (new_alloc.price - x_min) * x_scale;
+            double screen_y = window.getSize().y - (new_alloc.quality() - y_min) * y_scale;
 
             allocation_circles[i].setPosition(screen_x - 5, screen_y - 5);
         }
@@ -379,16 +379,16 @@ namespace peris {
 
             // Get the circle's position and radius
             sf::Vector2f position = circle.getPosition();
-            float radius = circle.getRadius();
+            double radius = circle.getRadius();
 
             // Adjust position to center
             position.x += radius;
             position.y += radius;
 
             // Calculate distance
-            float dx = mouse_position.x - position.x;
-            float dy = mouse_position.y - position.y;
-            float distance = std::sqrt(dx * dx + dy * dy);
+            double dx = mouse_position.x - position.x;
+            double dy = mouse_position.y - position.y;
+            double distance = std::sqrt(dx * dx + dy * dy);
 
             if (distance <= radius) {
                 hovered_allocation_index = static_cast<int>(i);

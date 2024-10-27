@@ -13,23 +13,29 @@ typedef long int ssize_t;
 #endif
 
 struct Household {
-    float inc;
-    float ability;
-    float aspiration;
+    int id;
+
+    double inc;
+    double ability;
+    double aspiration;
 
     // Endogenous variables
     ssize_t school;
     ssize_t house;
 
-    float contribution;
+    double contribution;
+
+    int item_id() const {
+        return id;
+    }
 
     /// The income for the agent.
-    float income() const {
+    double income() const {
         return inc;
     }
 
     /// This is the utility function used for this agent.
-    float utility(float price, float quality) const {
+    double utility(double price, double quality) const {
         // Additively separable utility function.
         return powf((inc - price), (1 - aspiration)) + powf(10.f * quality, aspiration);
     }
@@ -41,25 +47,25 @@ struct Household {
 
 struct School {
     ssize_t capacity; // Capacity of the school.
-    float x;
-    float y;
-    float quality;
+    double x;
+    double y;
+    double quality;
 
     // Endogenous variables
-    float attainment;
+    double attainment;
     int num_pupils; // Will be different from size if school is not full.
 };
 
 struct House {
-    float x;
-    float y;
+    double x;
+    double y;
 
     /// The (best) school allocated to this house.
     ssize_t school; // -1 means no school, -2 means invalid house.
 
     /// Store quality here to improve cache locality and avoid having to lookup quality from school.
     /// MUST remember to update this every time the school is changed.
-    float school_quality;
+    double school_quality;
 
     __device__ __host__ bool is_valid() const {
         return school >= -1;
@@ -73,11 +79,11 @@ struct House {
         school = -2;
     }
 
-    float quality() const {
+    double quality() const {
         return school_quality;
     }
 
-    void set_school(ssize_t school, float quality) {
+    void set_school(ssize_t school, double quality) {
         this->school = school;
         this->school_quality = quality;
     }
@@ -94,7 +100,7 @@ public:
     /// Returns a solver object from the data in this world. This is used to solve for the optimal prices.
     /// Note: this copies the data from the world instead of moving it.
     /// Maybe could switch to move semantics?
-    peris::Solver<Household, House> solver(float guess_factor = 0.2f);
+    peris::Solver<Household, House> solver(double guess_factor = 0.2f);
 
     /// Updates the world to reflect the solution from the solver.
     void reflect_solution(peris::Allocation<Household, House> solution_allocation);

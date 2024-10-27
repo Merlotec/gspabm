@@ -14,17 +14,18 @@ typedef long int ssize_t;
 /// Pareto efficient relative investment solver (PERIS).
 namespace peris {
     template<typename A>
-    concept AgentConcept = requires(A agent, float price, float quality)
+    concept AgentConcept = requires(A agent, double price, double quality)
     {
-        { agent.income() } -> std::same_as<float>;
-        { agent.utility(price, quality) } -> std::same_as<float>;
+        { agent.item_id() } -> std::same_as<int>;
+        { agent.income() } -> std::same_as<double>;
+        { agent.utility(price, quality) } -> std::same_as<double>;
         { agent.debug_info() } -> std::same_as<std::string>;
     };
 
     template<typename I>
     concept ItemConcept = requires(I item)
     {
-        { item.quality() } -> std::same_as<float>;
+        { item.quality() } -> std::same_as<double>;
     };
 
     /// Represents a single agent in the model, who wishes to maximize utility.
@@ -38,16 +39,20 @@ namespace peris {
         A agent;
 
         /// The current allocation price.
-        float price;
+        double price;
 
         /// The current allocation utility for the agent.
-        float utility;
+        double utility;
 
-        float quality() const {
+        /// Indicates a household that cannot be at this index (given a previous invalidation).
+        /// If it allocated here we know we would experience an infinite loop.
+        int blacklist_id = -1;
+
+        double quality() const {
             return item.quality();
         }
 
-        void set_price(float price) {
+        void set_price(double price) {
             this->price = price;
             recalculate_utility();
         }
@@ -59,17 +64,17 @@ namespace peris {
 
     template<typename A>
         requires AgentConcept<A>
-    float indifferent_quality(A &agent, float price, float u_0, float y_min, float y_max, float epsilon = 1e-4,
+    double indifferent_quality(A &agent, double price, double u_0, double y_min, double y_max, double epsilon = 1e-4,
                               int max_iter = 100) {
-        float lower = y_min;
-        float upper = y_max;
-        float mid = 0.0f;
+        double lower = y_min;
+        double upper = y_max;
+        double mid = 0.0f;
         int iter = 0;
 
         while (iter < max_iter) {
             mid = (lower + upper) / 2.0f;
-            float u_mid = agent.utility(price, mid);
-            float diff = u_mid - u_0;
+            double u_mid = agent.utility(price, mid);
+            double diff = u_mid - u_0;
 
             if (std::abs(diff) < epsilon)
                 return mid;
@@ -83,22 +88,22 @@ namespace peris {
         }
 
         // Return NaN (not a number) if solution was not found within the tolerance of epsilon
-        return std::numeric_limits<float>::quiet_NaN();
+        return std::numeric_limits<double>::quiet_NaN();
     }
 
     template<typename A>
         requires AgentConcept<A>
-    float indifferent_price(A &agent, float quality, float u_0, float x_min, float x_max, float epsilon = 1e-4,
+    double indifferent_price(A &agent, double quality, double u_0, double x_min, double x_max, double epsilon = 1e-4,
                             int max_iter = 100) {
-        float lower = x_min;
-        float upper = x_max;
-        float mid = 0.0f;
+        double lower = x_min;
+        double upper = x_max;
+        double mid = 0.0f;
         int iter = 0;
-        float u_mid;
+        double u_mid;
         while (iter < max_iter) {
             mid = (lower + upper) / 2.0f;
             u_mid = agent.utility(mid, quality);
-            float diff = u_mid - u_0;
+            double diff = u_mid - u_0;
 
             if (std::abs(diff) < epsilon)
                 return mid;
@@ -113,7 +118,7 @@ namespace peris {
         }
 
         // Return NaN if solution was not found within tolerance
-        return std::numeric_limits<float>::quiet_NaN();
+        return std::numeric_limits<double>::quiet_NaN();
     }
 }
 
