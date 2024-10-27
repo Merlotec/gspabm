@@ -500,6 +500,10 @@ namespace peris {
 
                 for (size_t j = 0; j < allocations.size(); ++j) {
                     if (i != j) {
+                        if (allocations[j].agent.item_id() == allocations[i].agent.item_id()) {
+                            std::cout << "Agent " << i << " has the same item_id as " << j << "; item_id= " << allocations[j].agent.item_id() << std::endl;
+                            return false;
+                        }
                         // Compute the utility agent i would get from allocation j
                         const double u_alt = allocations[i].agent.utility(allocations[j].price + 2.f * epsilon, allocations[j].item.quality());
                         if (u_alt > u) {
