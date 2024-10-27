@@ -289,7 +289,8 @@ namespace peris {
                                 // Shift that agent to here and recalculate.
                                 // We will have to invalidate previous allocations due to this.
                                 agent_to_promote = j;
-                                // Update the price to reflect this.
+
+                                // Update the price to reflect this - this will only be used if we do not promote.
                                 double max_price = prev.agent.income() - epsilon;
                                 double min_price = prev.price == 0 ? epsilon : prev.price - epsilon;
                                 double p_doublecross = indifferent_price(prev.agent, a.quality(), prev.utility,
@@ -298,7 +299,6 @@ namespace peris {
                                 if (p_doublecross > efficient_price) {
                                     efficient_price = p_doublecross;
                                 }
-                                break;
                             }
                         }
                     }
