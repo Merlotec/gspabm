@@ -154,6 +154,8 @@ namespace peris {
                 return SolutionResult::success;
             }
 
+            return align(render_state, 0, epsilon, max_iter);
+
             //Perform initial alignment.
             SolutionResult res;
             if ((res = align(render_state, 0, epsilon, max_iter)) < 0) {
