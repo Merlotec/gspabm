@@ -252,8 +252,8 @@ namespace peris {
             for (size_t j = 0; j < limit; ++j) {
                 if (i != j) {
                     // Compute the utility of agent i if they were allocated allocation j
-                    const double u_alt = allocations[i].agent.utility(allocations[j].price + 10.f * epsilon, allocations[j].item.quality());
-                    if (u_alt > u_max || (isnan(u_max) && !isnan(u_alt))) {
+                    const double u_alt = allocations[i].agent.utility(allocations[j].price, allocations[j].item.quality());
+                    if (u_alt > u_max + epsilon || (isnan(u_max) && !isnan(u_alt))) {
                         u_max = u_alt;
                         i_max = j;
                     }
