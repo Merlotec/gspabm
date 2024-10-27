@@ -1,6 +1,8 @@
 //
 // Created by ncbmk on 10/22/24.
 //
+// Updated documentation and comments for clarity.
+//
 
 #ifndef SOLVER_H
 #define SOLVER_H
@@ -15,6 +17,8 @@ typedef long int ssize_t;
 #endif
 
 namespace peris {
+
+    /// Enumeration of possible results from the solver functions
     enum SolutionResult : int {
         err_cycle = -4,
         err_budget_constraint = -3,
@@ -25,21 +29,31 @@ namespace peris {
         repeat = 2,
     };
 
-      /// The class providing the solving functionality, requiring an agent type A and a utility function, U.
-    /// Templates are used so that the function can be inlined, and so that the agent type can be stored in the array.
-    /// This improves cache locality, which should improve performance.
+    /// @brief The Solver class calculates Pareto efficient allocations of items to agents.
+    ///        Each agent receives exactly one item. The goal is to determine prices such that
+    ///        no agent would prefer any other agent's allocation at the given prices.
+    ///
+    /// @tparam A The agent type, must satisfy AgentConcept (e.g., have income(), utility() methods)
+    /// @tparam I The item type, must satisfy ItemConcept (e.g., have quality() method)
+    ///
     template<typename A, typename I>
         requires AgentConcept<A> && ItemConcept<I>
     class Solver {
-        /// Describes what offer is allocated to what agent. Since the item to be allocated always remains in the same
-        /// allocation object, the index of the allocation uniquely identifies the item.
+        /// Vector containing the current allocations of items to agents
+        /// Each Allocation contains an agent, item, price, and utility
         std::vector<Allocation<A, I> > allocations;
 
+        /// @brief Swaps the agents between allocations at indices a and b,
+        ///        and recalculates the utility for the affected allocations.
+        ///
+        /// @param a Index of the first allocation
+        /// @param b Index of the second allocation
+        ///
         void swap_agents(size_t a, size_t b) {
             auto agent_a = allocations[a].agent;
             auto agent_b = allocations[b].agent;
 
-            // Swap the agent object.
+            // Swap the agent objects.
             allocations[a].agent = agent_b;
             // Calculate utility for new agent.
             allocations[a].recalculate_utility();
@@ -49,10 +63,14 @@ namespace peris {
             allocations[b].recalculate_utility();
         }
 
-        // Moves the agent at index 'a' to index 'b' in the allocations vector,
-        // shifting agents between positions 'b' and 'a-1' up by one position.
-        // This effectively inserts the agent at position 'a' into position 'b',
-        // pushing other agents forward in the vector.
+        /// @brief Moves the agent at index 'a' to index 'b' in the allocations vector,
+        ///        shifting agents between positions 'b' and 'a-1' up by one position.
+        ///        This effectively inserts the agent at position 'a' into position 'b',
+        ///        pushing other agents forward in the vector.
+        ///
+        /// @param a Source index of the agent to move (must be greater than b)
+        /// @param b Destination index where the agent will be placed
+        ///
         void displace_up(size_t a, size_t b) {
             assert(b < a); // Ensure that the source index 'a' is greater than the destination index 'b'.
 
@@ -80,8 +98,16 @@ namespace peris {
             // which has already been moved to position 'b', so it can be discarded.
         }
 
+        /// @brief Moves the agent at index 'a' to index 'b' in the allocations vector,
+        ///        shifting agents between positions 'a+1' and 'b' down by one position.
+        ///        This effectively inserts the agent at position 'a' into position 'b',
+        ///        pulling other agents backward in the vector.
+        ///
+        /// @param a Source index of the agent to move (must be less than b)
+        /// @param b Destination index where the agent will be placed
+        ///
         void displace_down(size_t a, size_t b) {
-            assert(b > a); // Ensure that the source index 'a' is greater than the destination index 'b'.
+            assert(b > a); // Ensure that the destination index 'b' is greater than the source index 'a'.
 
             // Temporarily store the agent at position 'b' as it will be overridden.
             auto free_agent = allocations[b].agent;
@@ -90,8 +116,8 @@ namespace peris {
             allocations[b].agent = allocations[a].agent;
             allocations[b].recalculate_utility(); // Update utility after changing the agent.
 
-            // Shift agents from position 'b+1' to 'a' up by one position.
-            // This loop moves each agent into the position of the previous agent.
+            // Shift agents from position 'b-1' down to 'a' by one position.
+            // This loop moves each agent into the position of the next agent.
             for (ssize_t i = b - 1; i >= (ssize_t)a; --i) {
                 // Store the current agent to be moved in the next iteration.
                 auto agent_buffer = allocations[i].agent;
@@ -108,17 +134,30 @@ namespace peris {
         }
 
     public:
+        ///
+        /// @brief Constructs the Solver with given agents and items.
+        ///
+        ///        - Asserts that the number of agents equals the number of items.
+        ///        - Sorts agents in order of increasing income.
+        ///        - Sorts items in order of increasing quality.
+        ///        - Initializes Allocations vector pairing each agent with an item,
+        ///          setting an initial guess price based on the agent's income.
+        ///
+        /// @param agents Vector of agents
+        /// @param items  Vector of items
+        /// @param guess_factor Initial guess factor for prices (used as price = guess_factor * agent.income())
+        ///
         Solver(std::vector<A> agents, std::vector<I> items, double guess_factor) {
             // Ensure that there is one item per agent (numbers of each are the same).
             assert(agents.size() == items.size());
 
-            // Sort agents by income and items by quality (increasing), so that the pairing has the highest items allocated to the highest
-            // earners and vice versa.
+            // Sort agents by income (increasing order), so lower-income agents are first.
             std::sort(agents.begin(), agents.end(), [](A a, A b) { return a.income() < b.income(); });
+            // Sort items by quality (increasing order), so lower-quality items are first.
             std::sort(items.begin(), items.end(), [](I a, I b) { return a.quality() < b.quality(); });
 
             allocations.reserve(items.size());
-            // Combine the items and agents into one for convenience for the solver.
+            // Combine the items and agents into allocations.
             for (size_t i = 0; i < items.size(); i++) {
                 // Set the initial guess price to an arbitrary guess according to the function p_i = guess_factor * y_i
                 const double guess_price = guess_factor * agents[i].income();
@@ -133,53 +172,51 @@ namespace peris {
             }
         }
 
+        ///
+        /// @brief Returns a copy of the current allocations vector.
+        ///
+        /// @return A vector of Allocations containing the current allocation state.
+        ///
         std::vector<Allocation<A, I>> get_allocations() {
             return std::vector<Allocation<A, I>>(this->allocations);
         }
 
-        /**
-         * Solves the allocation model to achieve Pareto efficiency among agents.
-         * The algorithm assigns items to agents in a way that no agent can be made better off
-         * without making another agent worse off. It iteratively adjusts allocations and prices,
-         * possibly swapping agents to improve overall efficiency.
-         *
-         * The function visualizes the progress by drawing on the specified SFML window.
-         *
-         * @param epsilon The tolerance for numerical approximations (default is 1e-5).
-         * @return A reference to the vector of allocations after solving.
-         */
+        ///
+        /// @brief Solves the allocation model to achieve Pareto efficiency among agents.
+        ///        The algorithm assigns items to agents in a way that no agent can be made better off
+        ///        without making another agent worse off. It iteratively adjusts allocations and prices,
+        ///        possibly swapping agents to improve overall efficiency.
+        ///
+        /// @param render_state Pointer to a RenderState object for visualization (can be nullptr)
+        /// @param epsilon The tolerance for numerical approximations (default is 1e-5)
+        /// @param max_iter The maximum number of iterations for convergence (default is 200)
+        ///
+        /// @return A SolutionResult indicating success or type of error.
+        ///
         SolutionResult solve(RenderState<A, I>* render_state, double epsilon = 1e-5, int max_iter = 200) {
-            // If there are no agents, return the empty allocations vector.
+            // If there are no agents, return success.
             if (allocations.empty()) {
                 return SolutionResult::success;
             }
 
+            // Start alignment process from index 0
             return align(render_state, 0, epsilon, max_iter);
-
-            //Perform initial alignment.
-            SolutionResult res;
-            if ((res = align(render_state, 0, epsilon, max_iter)) < 0) {
-                // Exit command.
-                return res;
-            }
-
-            SolutionResult pres;
-            while ((pres = push(epsilon, max_iter)) == SolutionResult::repeat) {
-                if (render_state != nullptr) {
-                    if (!render_state->draw_allocations(this->allocations, -1)) {
-                        return SolutionResult::terminated;
-                    }
-                }
-            }
-
-            if (pres != SolutionResult::success) {
-                return pres;
-            }
-
-            return SolutionResult::success;
         }
 
     private:
+        ///
+        /// @brief Finds the index of the most preferred allocation for agent at index 'i' among allocations.
+        ///
+        ///        It goes through other allocations and computes the utility the agent at index 'i' would get
+        ///        from those allocations (after adjusting the price slightly to avoid division by zero or
+        ///        price equality issues). It returns the index of the allocation that provides the maximum utility.
+        ///
+        /// @param i Index of the agent/allocation to consider.
+        /// @param search_above If true, search only for allocations with higher indices than 'i'
+        /// @param epsilon Tolerance used for price adjustments
+        ///
+        /// @return The index of the most preferred allocation for agent at index 'i'
+        ///
         size_t most_preferred(size_t i, bool search_above, double epsilon) {
             assert(i < allocations.size());
             double u_max;
@@ -192,8 +229,10 @@ namespace peris {
 
             size_t limit = search_above ? allocations.size() : i;
 
+            // Iterate over allocations to find the most preferred one for agent i
             for (size_t j = 0; j < limit; ++j) {
                 if (i != j) {
+                    // Compute the utility of agent i if they were allocated allocation j
                     const double u_alt = allocations[i].agent.utility(allocations[j].price + 10.f * epsilon, allocations[j].item.quality());
                     if (u_alt > u_max || (isnan(u_max) && !isnan(u_alt))) {
                         u_max = u_alt;
@@ -205,48 +244,56 @@ namespace peris {
             return i_max;
         }
 
+        ///
+        /// @brief Aligns the allocations starting from index 'i' to achieve Pareto efficiency.
+        ///
+        ///        The align function is the core of the algorithm. It assigns allocations and adjusts prices
+        ///        such that each agent prefers their own allocation over any other allocation,
+        ///        i.e., no agent would prefer another allocation at the given prices.
+        ///
+        ///        It may involve adjusting prices, displacing agents (moving them up or down in the allocation list),
+        ///        to ensure that allocations are Pareto efficient.
+        ///
+        /// @param render_state Pointer to a RenderState for visualization (can be nullptr)
+        /// @param i Starting index for alignment
+        /// @param epsilon Numerical tolerance for calculations
+        /// @param max_iter Maximum number of iterations for numerical methods
+        ///
+        /// @return A SolutionResult indicating success or type of error.
+        ///
         SolutionResult align(RenderState<A, I>* render_state, size_t i, double epsilon, int max_iter = 100) {
-            // Initialize the first allocation:
-            // Assign the first (lowest income) agent to the lowest quality item at zero price.
-            // This sets a baseline, as the lowest agent cannot pay less than zero.
+            // Initialize the first allocation if starting from index 0
             if (i == 0) {
+                // Set the price of the first allocation to zero
                 allocations[0].set_price(0.0f);
                 i = 1;
             }
 
             size_t head = i;
-
             size_t reserve = 0;
-
             bool in_reserve = false;
 
-            // Iterate through each agent starting from the second one.
-            // The goal is to assign items to agents in a way that is efficient and respects their preferences.
-            for (;i < allocations.size(); ++i) {
+            // Iterate through each agent starting from index i
+            for (; i < allocations.size(); ++i) {
                 if (i >= allocations.size() - reserve) {
                     in_reserve = true;
                 }
-                // Initialize 'agent_to_displace' to -1, indicating no displacement needed initially.
+                // Initialize variables to keep track of agents to displace or promote
                 ssize_t agent_to_displace = -1;
                 ssize_t agent_to_promote = -1;
 
-                // References to the current allocation 'a' and the previous allocation 'l'.
                 Allocation<A, I>& a = allocations[i];     // Current allocation
+                Allocation<A, I>& l = allocations[i - 1]; // Previous allocation
 
-                // Determine the 'efficient_price' at which a previous agent 'k' is indifferent
-                // between their own allocation and the current allocation 'a'.
-                Allocation<A, I>& l = allocations[i - 1];
-
-                // The maximum price is limited by the agent's income minus epsilon.
+                // Compute the efficient price where the previous agent is indifferent between their own allocation and the current one
                 double max_price = l.agent.income() - epsilon;
-
-                // Find the price that makes agent 'l' indifferent between their own allocation
-                // and the current allocation 'a'. This uses a numerical method of bisection.
                 double min_price = l.price == 0 ? epsilon : l.price - epsilon;
+
                 double efficient_price = indifferent_price(l.agent, a.quality(), l.utility,
                                                     min_price, max_price, epsilon, max_iter);
 
                 if (isnan(efficient_price)) {
+                    // If unable to compute efficient price, use max price if it improves utility
                     if (l.agent.utility(max_price, a.quality()) > l.utility) {
                         efficient_price = max_price;
                     } else {
@@ -254,15 +301,15 @@ namespace peris {
                     }
                 }
 
+                // Check if the efficient price exceeds the current agent's income
                 if (efficient_price + epsilon > a.agent.income()) {
-                    // Find best place to move agent to.
+                    // Find the most preferred allocation for the current agent among those below
                     size_t new_i = most_preferred(i, false, epsilon); // Do not search above because not yet allocated.
                     agent_to_displace = new_i;
                 }
 
                 if (agent_to_displace == -1) {
-
-                    // Check if this agent prefers any previous allocations.
+                    // Check if this agent prefers any previous allocations
                     double u_max = a.agent.utility(efficient_price - 100.f * epsilon, a.quality());
 
                     if (isnan(u_max))
@@ -271,6 +318,7 @@ namespace peris {
                     for (ssize_t j = i - 1; j >= 0; --j) {
                         const Allocation<A, I>& prev = allocations[j];
 
+                        // Check if the agent can afford the previous allocation
                         if (a.agent.income() > prev.price + epsilon) {
                             double u_prev = a.agent.utility(prev.price + 100.f * epsilon, prev.quality());
                             if (isnan(u_prev))
@@ -282,12 +330,10 @@ namespace peris {
                             }
                         }
 
-                        // Check if this other agent prefers this allocation.
-                        // Do not care about previous agent because we expect their utility to be the same due to the indifference condition.
+                        // Check if the previous agent prefers the current allocation at efficient price
                         if (prev.agent.income() > efficient_price) {
                             if (j < i - 1 && prev.agent.utility(efficient_price + epsilon, a.quality()) > prev.utility) {
-                                // Shift that agent to here and recalculate.
-                                // We will have to invalidate previous allocations due to this.
+                                // Mark this agent to promote
                                 agent_to_promote = j;
 
                                 // Update the price to reflect this - this will only be used if we do not promote.
@@ -303,7 +349,6 @@ namespace peris {
                         }
                     }
 
-
                     // If no displacement is needed, update the current allocation's price and utility.
                     if (agent_to_displace == -1) {
                         if (efficient_price + epsilon > a.agent.income()) {
@@ -311,27 +356,21 @@ namespace peris {
                             size_t new_i = most_preferred(i, false, epsilon); // Do not search above because not yet allocated.
                             agent_to_displace = new_i;
                         } else {
-                            // Find the existing agent that gives this agent highest utility and switch.
-                            // Calculate the utility of the current agent 'a' at the 'efficient_price'.
+                            // Update the allocation with the efficient price and utility
                             double efficient_utility = a.agent.utility(efficient_price, a.quality());
                             if (isnan(efficient_utility))
                                 return SolutionResult::err_nan;
 
-                            // Set the price to the 'efficient_price' and update utility for the current allocation.
                             a.price = efficient_price;
                             a.utility = efficient_utility;
                         }
-
-
-
                     }
                 }
 
                 if (agent_to_displace >= 0) {
-                    // Only promote if we also need to displace, otherwise there is no need.
+                    // Handle displacement or promotion of agents
                     if (agent_to_promote >= 0) {
-                        // Blacklist old allocation
-                        //allocations[agent_to_promote].blacklist_id = allocations[agent_to_promote].agent.item_id();
+                        // Displace the agent to the reserve area
                         displace_down(agent_to_promote, allocations.size() - 1);
                         ++reserve;
                         i = max(agent_to_promote - 1L, 0L);
@@ -344,6 +383,7 @@ namespace peris {
                     }
                 }
 
+                // Visualization code if render_state is provided
                 if (render_state != nullptr) {
                     if (i > head) {
                         if (!render_state->draw_allocations(this->allocations, i)) {
@@ -356,30 +396,38 @@ namespace peris {
             return SolutionResult::success;
         }
 
-        /// Returns true if any agent was pushed, else false.
+        ///
+        /// @brief Adjusts prices to ensure that no agent prefers another allocation.
+        ///
+        ///        The push method iteratively increases prices where necessary to prevent agents
+        ///        from preferring allocations assigned to other agents. It ensures that the prices
+        ///        are set such that each agent's utility from their own allocation is at least as
+        ///        high as any other allocation they could afford.
+        ///
+        /// @param epsilon Numerical tolerance for calculations
+        /// @param max_iter Maximum number of iterations for numerical methods
+        ///
+        /// @return A SolutionResult indicating whether any prices were updated or an error occurred.
+        ///
         SolutionResult push(double epsilon, int max_iter) {
             size_t updated = 0;
-            // Start from top, go backwards and ensure we are not inside above indifference curve.
+            // Start from the top allocation and move backwards
             for (ssize_t i = allocations.size() - 1; i >= 0; --i) {
-                // References to the current allocation 'a' and the previous allocation 'l'.
                 Allocation<A, I>& a = allocations[i];     // Current allocation
-
                 double efficient_price = a.price;
-                // Check if any earlier agents (from index 0 to k-1) prefer the current allocation at 'efficient_price'.
+
+                // Check if any earlier agents prefer the current allocation at 'efficient_price'
                 for (ssize_t j = allocations.size() - 1; j >= 0; --j) {
                     if (i == j) {
                         continue;
                     }
                     Allocation<A, I>& other = allocations[j];
 
-                    // Ensure that the 'efficient_price' is within the acceptable range for agent 'prev'.
+                    // Ensure that 'other' can afford the current allocation
                     if (efficient_price + epsilon < other.agent.income()) {
-                        //assert(a.quality() >= other.quality()); // Quality should be non-decreasing.
-
-                        // If agent 'other' prefers the current allocation at 'efficient_price' over their own allocation.
+                        // If agent 'other' prefers the current allocation at 'efficient_price'
                         if (other.agent.utility(efficient_price + epsilon, a.quality()) > other.utility) {
-                            // Update 'next_k' to 'j' to consider this agent in the next iteration.
-                            // The maximum price is limited by the agent's income minus epsilon.
+                            // Update the efficient price to prevent 'other' from preferring it
                             double max_price = other.agent.income() - epsilon;
                             double min_price = other.price == epsilon;
 
@@ -397,9 +445,9 @@ namespace peris {
                     }
                 }
 
-                // Update to reflect new efficient price.
+                // Update to reflect new efficient price
                 if (efficient_price > a.price + epsilon) {
-                    // Update efficient price and utility.
+                    // Update efficient price and utility
                     if (efficient_price > a.agent.income()) {
                         return SolutionResult::err_budget_constraint;
                     }
@@ -414,8 +462,19 @@ namespace peris {
                 return SolutionResult::success;
             }
         }
+
     public:
-        /// Verifies that the current allocation is a solution.
+        ///
+        /// @brief Verifies that the current allocation is a valid solution.
+        ///
+        ///        Checks that no agent would prefer any other agent's allocation at the given prices.
+        ///        Ensures that each agent's utility is correct and that no agent can improve their utility
+        ///        by switching to another allocation they can afford.
+        ///
+        /// @param epsilon Numerical tolerance for comparisons (default is 1e-6)
+        ///
+        /// @return True if the current allocation is valid; false otherwise.
+        ///
         bool verify_solution(const double epsilon = 1e-6) const {
             for (size_t i = 0; i < allocations.size(); ++i) {
                 double u = allocations[i].agent.utility(allocations[i].price, allocations[i].item.quality());
@@ -426,6 +485,7 @@ namespace peris {
 
                 for (size_t j = 0; j < allocations.size(); ++j) {
                     if (i != j) {
+                        // Compute the utility agent i would get from allocation j
                         const double u_alt = allocations[i].agent.utility(allocations[j].price + 2.f * epsilon, allocations[j].item.quality());
                         if (u_alt > u) {
                             std::cout << "Agent " << i << " prefers allocation " << j << "; " << u_alt << ">" << u << std::endl;
@@ -437,10 +497,24 @@ namespace peris {
             return true;
         }
 
+        ///
+        /// @brief Draws the current allocations using the provided RenderState.
+        ///
+        /// @param render_state Pointer to a RenderState object for visualization.
+        ///
+        /// @return True if drawing was successful; false if terminated.
+        ///
         bool draw(RenderState<A, I>* render_state) {
             return render_state->draw_allocations(this->allocations, -1);
         }
 
+        ///
+        /// @brief Performs a linear regression of price on quality.
+        ///
+        ///        Calculates the best-fit line of the form price = a + b * quality
+        ///        using least squares regression, and outputs the regression coefficients
+        ///        and the coefficient of determination (R^2).
+        ///
         void regress_price_on_quality() {
             // Ensure there are enough data points
             if (allocations.size() < 2) {
@@ -454,6 +528,7 @@ namespace peris {
             double sum_xx = 0.0f;  // Sum of qualities squared
             double sum_xy = 0.0f;  // Sum of quality * price
 
+            // Calculate sums required for regression coefficients
             for (const auto& alloc : allocations) {
                 double x = alloc.quality();
                 double y = alloc.price;
@@ -479,7 +554,7 @@ namespace peris {
 
             std::cout << "Regression result: price = " << a << " + " << b << " * quality" << std::endl;
 
-            // Optionally, calculate the coefficient of determination (R^2)
+            // Calculate the coefficient of determination (R^2)
             double ss_tot = 0.0f;
             double ss_res = 0.0f;
             for (const auto& alloc : allocations) {
