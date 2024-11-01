@@ -27,11 +27,11 @@ World create_world(const size_t school_count, const size_t house_count) {
     std::random_device rd;
     std::mt19937 gen(rd());
 
-    std::normal_distribution<double> school_quality_distribution(0.8, 0.25);
+    std::normal_distribution<double> school_quality_distribution(0.8, 0.28);
     std::normal_distribution<double> ability_distribution(0, 1.0);
-    std::normal_distribution<double> aspiration_distribution(0.6, 0.15);
+    std::normal_distribution<double> aspiration_distribution(0.6, 0.18);
 
-    constexpr double mean_household_inc = 120.0;
+    constexpr double mean_household_inc = 100.0;
 
     double cv = 0.3; // Adjusts variance and skewness of distribution
     double variance = (cv * mean_household_inc) * (cv * mean_household_inc);
@@ -188,21 +188,24 @@ __global__ void determine_bids(Household* households, int household_count, Schoo
 }
 
 int main() {
-    constexpr size_t school_count = 150;
-    constexpr size_t house_count = 150;
+    constexpr size_t school_count = 300;
+    constexpr size_t house_count = 300;
 
     std::cout << "Creating with " << school_count << " schools" << " and " << house_count << " houses" << std::endl;
 
+
     World world = create_world(school_count, house_count);
+    while (!world.validate()) {
+        world = create_world(school_count, house_count);
 
-    std::cout << "Created world" << std::endl;
+        std::cout << "Created world" << std::endl;
+    }
 
-    assert(world.validate());
 
     auto solver = world.solver();
 
     // Setup render window to draw visuals.
-    peris::RenderState<Household, House> render_state(solver.get_allocations());
+    peris::RenderState<Household, House> render_state{};
 
     solver.draw(&render_state);
 

@@ -31,6 +31,36 @@ namespace peris {
         repeat = 2,
     };
 
+    struct SolutionTick {
+        ssize_t agent_to_promote = -1;
+        ssize_t agent_to_displace = -1;
+
+        size_t i;
+
+        SolutionResult result;
+
+        SolutionTick(SolutionResult result, size_t i) : result(result), i(i) {}
+
+        static SolutionTick promote(size_t i, ssize_t a) {
+            auto tick = SolutionTick(SolutionResult::repeat, i);
+            tick.agent_to_promote = a;
+            return tick;
+        }
+
+        static SolutionTick displace(size_t i, ssize_t a) {
+            auto tick = SolutionTick(SolutionResult::repeat, i);
+            tick.agent_to_displace = a;
+            return tick;
+        }
+
+        static SolutionTick doublecross(size_t i, size_t displace, size_t promote) {
+            auto tick = SolutionTick(SolutionResult::repeat, i);
+            tick.agent_to_displace = displace;
+            tick.agent_to_promote = promote;
+            return tick;
+        }
+    };
+
     /// @brief The Solver class calculates Pareto efficient allocations of items to agents.
     ///        Each agent receives exactly one item. The goal is to determine prices such that
     ///        no agent would prefer any other agent's allocation at the given prices.
@@ -135,7 +165,7 @@ namespace peris {
             // which has already been moved to position 'b', so it can be discarded.
         }
 
-        double calculate_efficient_price(const Allocation<A, I> &l, const Allocation<A, I> &a, const double epsilon, const int max_iter) {
+        static double calculate_efficient_price(const Allocation<A, I> &l, const Allocation<A, I> &a, const double epsilon, const int max_iter) {
 
             double max_price = l.agent.income() - epsilon;
             double min_price = l.price == 0 ? epsilon : l.price - epsilon;
@@ -146,6 +176,23 @@ namespace peris {
             if (isnan(efficient_price)) {
                 // If unable to compute efficient price, use max price if it improves utility
                 if (l.agent.utility(max_price, a.quality()) > l.utility) {
+                    efficient_price = max_price;
+                }
+            }
+            return efficient_price;
+        }
+
+        static double calculate_pulled_price(const Allocation<A, I> &l, const Allocation<A, I> &a, const double epsilon, const int max_iter) {
+
+            double max_price = l.agent.income() - epsilon;
+            double min_price = l.price == 0 ? epsilon : l.price - epsilon;
+
+            double efficient_price = indifferent_price(a.agent, l.quality(), a.utility,
+                                                min_price, max_price, epsilon, max_iter);
+
+            if (isnan(efficient_price)) {
+                // If unable to compute efficient price, use max price if it improves utility
+                if (a.agent.utility(max_price, l.quality()) > a.utility) {
                     efficient_price = max_price;
                 }
             }
@@ -217,9 +264,118 @@ namespace peris {
             if (allocations.empty()) {
                 return SolutionResult::success;
             }
+            //return align(render_state, 0, epsilon, max_iter);
+            // // Perform initial alignment.
+            // SolutionResult res;
+            // if ((res = align(render_state, 0, epsilon, max_iter)) < 0) {
+            //     // Exit command.
+            //     return res;
+            // }
+            // std::cout << "Allocated" << std::endl;
+            // SolutionResult pres;
+            // while ((pres = push(epsilon, max_iter)) == SolutionResult::repeat) {
+            //     if (render_state != nullptr) {
+            //         if (!render_state->draw_allocations(this->allocations, -1)) {
+            //             return SolutionResult::terminated;
+            //         }
+            //     }
+            // }
+            //
+            // if (pres != SolutionResult::success) {
+            //     return pres;
+            // }
+            //
+            // return SolutionResult::success;
 
-            // Start alignment process from index 0
-            return align(render_state, 0, epsilon, max_iter);
+            // If there is a double crossing agent that is being sorted, this should be its index.
+            // This lets us know not to promote the agent when we experience the double cross.
+            ssize_t doublecross_idx = -1;
+
+            size_t i = 0;
+            size_t reserve = 0;
+            size_t to_skip = 0;
+
+            bool pause = false;
+            bool tick_visual = false;
+
+            while (true) {
+                if (render_state != nullptr) {
+                    if (to_skip > 0) {
+                        --to_skip;
+                    } else {
+                        auto rc = render_state->draw_allocations(this->allocations, i);
+                        if (pause) {
+                            tick_visual = false;
+                            if (rc == RenderCommand::pause) {
+                                pause = false;
+                            } else if (rc == RenderCommand::tick) {
+                                tick_visual = true;
+                            }
+                        } else {
+                            if (rc == RenderCommand::pause) {
+                                pause = true;
+                            }
+                        }
+
+                        if (rc == RenderCommand::skip) {
+                            to_skip = 100;
+                        }
+
+                        if (pause && !tick_visual) {
+                            continue;
+                        }
+                    }
+                }
+
+
+                // Align
+                auto tick = try_align(allocations, i, allocations.size() - reserve, epsilon, max_iter);
+
+                if (tick.result == SolutionResult::success) {
+                    if (reserve == 0) {
+                        return SolutionResult::success;
+                    } else {
+                        // Perform reserve allocation.
+                        // Move reserve to correct place.
+                        const size_t r = allocations.size() - reserve;
+                        // Find optimal location - this assumes everything below r is perfectly allocated.
+                        const size_t pref = most_preferred(allocations, r, false, epsilon);
+                        // TODO: maybe check end of non-reserve to see if we should just slot it in?
+
+                        assert(pref < r);
+
+                        displace_up(r, pref);
+                        doublecross_idx = pref; // So that we know what to use as the current double-cross target.
+                        i = max(tick.agent_to_displace, 1L);
+                        --reserve;
+                    }
+                } else if (tick.result != SolutionResult::repeat) {
+                    return tick.result;
+                }
+
+                if (tick.agent_to_displace != -1) {
+                    if (tick.agent_to_promote != -1) {
+                        if (tick.agent_to_promote == doublecross_idx) {
+                            // Push back because we know that this is optimal position.
+                            auto res = pull_back(allocations, tick.i, epsilon, max_iter);
+                            if (res <= 0) {
+                                return res;
+                            }
+                            i++;
+                        } else {
+                            displace_down(tick.agent_to_promote, allocations.size() - 1);
+                            i = max(tick.agent_to_promote, 1L);
+                            ++reserve;
+                        }
+                    } else {
+                        assert(tick.agent_to_displace < tick.i); // The agent to displace should be at a lower index.
+                        // Displace the current agent 'a' to position 'agent_to_displace', shifting other agents accordingly.
+                        displace_up(tick.i, tick.agent_to_displace);
+                        i = max(tick.agent_to_displace, 1L);
+                    }
+                }
+            }
+
         }
 
     private:
@@ -230,13 +386,14 @@ namespace peris {
         ///        from those allocations (after adjusting the price slightly to avoid division by zero or
         ///        price equality issues). It returns the index of the allocation that provides the maximum utility.
         ///
+        /// @param allocations
         /// @param i Index of the agent/allocation to consider.
         /// @param search_above If true, search only for allocations with higher indices than 'i'
         /// @param epsilon Tolerance used for price adjustments
         ///
         /// @return The index of the most preferred allocation for agent at index 'i'
         ///
-        size_t most_preferred(size_t i, bool search_above, double epsilon) {
+        static size_t most_preferred(std::vector<Allocation<A, I>>& allocations, size_t i, bool search_above, double epsilon) {
             assert(i < allocations.size());
             double u_max;
             if (allocations[i].agent.income() < allocations[i].price) {
@@ -295,15 +452,55 @@ namespace peris {
             // This is used for rendering so that we only re-render when the next allocation has been reached.
             size_t head = i;
 
+            std::vector<int> reserve_set{};
+
+            size_t reserve_count = 0;
+
+            size_t repeat = 0;
+            size_t repeat_n = 0;
+
+            bool break_loop = false;
+
+            bool pause = false;
+            bool tick = false;
+            bool swap_always = false;
+
+            size_t to_skip = 0;
+
+            std::optional<int> immune_id{};
+
             // Iterate through each agent starting from index i
             while (i < allocations.size()) {
                 // Visualization code if render_state is provided
                 if (render_state != nullptr) {
-                    if (i > head) {
-                        if (!render_state->draw_allocations(this->allocations, i)) {
-                            return SolutionResult::terminated;
+                    if (to_skip > 0) {
+                        --to_skip;
+                    } else {
+                        auto rc = render_state->draw_allocations(this->allocations, i);
+                        if (pause) {
+                            tick = false;
+                            if (rc == RenderCommand::pause) {
+                                pause = false;
+                            } else if (rc == RenderCommand::tick) {
+                                tick = true;
+                            }
+                        } else {
+                            if (rc == RenderCommand::pause) {
+                                pause = true;
+                            }
+                        }
+
+                        if (rc == skip) {
+                            // Skip n elements
+                            to_skip = head * allocations.size();
+                        } else if (rc == RenderCommand::enable_swap_always) {
+                            swap_always = !swap_always;
                         }
                     }
+                }
+
+                if (pause && !tick) {
+                    continue;
                 }
                 head = max(i, head);
 
@@ -313,6 +510,38 @@ namespace peris {
 
                 Allocation<A, I>& a = allocations[i];     // Current allocation
                 Allocation<A, I>& l = allocations[i - 1]; // Previous allocation
+
+                // if (i >= allocations.size() - reserve_count) {
+                //     std::vector<int> new_reserve_set{};
+                //     for (size_t j = i; j < allocations.size(); ++j) {
+                //         new_reserve_set.push_back(allocations[j].agent.item_id());
+                //     }
+                //     std::sort(new_reserve_set.begin(), new_reserve_set.end());
+                //
+                //     // If we are in a cycle, allocate the lowest item in the cycle and do not allow any switches for agents pushed out by this double-crossing agent.
+                //     // In other words just keep the bad agent where it is.
+                //     // To do this we mark the id of the agent to be 'immune' from promotion.
+                //     if (reserve_set == new_reserve_set) {
+                //         //immune_id = a.agent.item_id();
+                //         std::cout << "n = " << new_reserve_set.size() << std::endl;
+                //         if (reserve_set.size() == repeat_n) {
+                //             ++repeat;
+                //         } else {
+                //             repeat = 0;
+                //         }
+                //         repeat_n = reserve_set.size();
+                //     } else {
+                //         immune_id = std::optional<int>();
+                //         repeat = 0;
+                //     }
+                //
+                //     if (repeat > 3) {
+                //         immune_id = a.agent.item_id();
+                //     }
+                //
+                //     reserve_set = std::vector<int>(new_reserve_set);
+                //     --reserve_count;
+                // }
 
                 double efficient_price = calculate_efficient_price(l, a, epsilon, max_iter);
 
@@ -332,7 +561,8 @@ namespace peris {
                             if (j < i - 1 && prev.agent.utility(efficient_price, a.quality()) > prev.utility + epsilon) {
                                 // Mark this agent to promote
                                 agent_to_promote = j;
-
+                                // displace this agent down there.
+                                //agent_to_displace = j;
                                 // Calculate the new efficient price by making this 'prev' agent indifferent.
                                 double new_price = calculate_efficient_price(prev, a, epsilon, max_iter);
 
@@ -392,13 +622,18 @@ namespace peris {
 
                 if (agent_to_displace >= 0) {
                     // Handle displacement or promotion of agents
-                    if (agent_to_promote >= 0) {
+                    if (agent_to_promote >= 0 && !swap_always) {
                         // Displace the agent to the reserve area
-                        displace_down(agent_to_promote, allocations.size() - 1);
-                        i = max(agent_to_promote, 1L);
+                        // Check if this agent is immune from being promoted.
+                        if (allocations[agent_to_promote].agent.item_id() != immune_id) {
+                            displace_down(agent_to_promote, allocations.size() - 1);
+                            i = max(agent_to_promote, 1L);
+                            ++reserve_count;
+                        } else {
+                            ++i;
+                        }
                     } else {
                         assert(agent_to_displace < i); // The agent to displace should be at a lower index.
-
                         // Displace the current agent 'a' to position 'agent_to_displace', shifting other agents accordingly.
                         displace_up(i, agent_to_displace);
                         i = max(agent_to_displace, 1L);
@@ -410,6 +645,178 @@ namespace peris {
             }
             return SolutionResult::success;
         }
+
+        static SolutionTick try_align(std::vector<Allocation<A, I>>& allocations, size_t i, size_t end, double epsilon, int max_iter = 100) {
+            // Initialize the first allocation if starting from index 0
+            if (i == 0) {
+                // Set the price of the first allocation to zero.
+                // This essentially 'anchors' the algorithm so that all other allocations can be distributed around this value.
+                allocations[0].set_price(0.0f);
+
+                // We have allocated agent 0 so we can start at agent 1.
+                i = 1;
+            }
+
+            // Keeps track of the highest index that has so far been reached.
+            // This is used for rendering so that we only re-render when the next allocation has been reached.
+            size_t head = i;
+
+            // std::vector<int> reserve_set{};
+            //
+            // size_t reserve_count = 0;
+            //
+            // bool break_loop = false;
+
+            // Iterate through each agent starting from index i
+            while (i < end) {
+                head = max(i, head);
+
+                // if (i >= allocations.size() - reserve_count) {
+                //     std::vector<int> new_reserve_set{};
+                //     for (size_t j = i; j < allocations.size(); ++j) {
+                //         new_reserve_set.push_back(allocations[j].agent.item_id());
+                //     }
+                //     std::sort(new_reserve_set.begin(), new_reserve_set.end());
+                //
+                //     break_loop = reserve_set == new_reserve_set;
+                //
+                //     if (break_loop) {
+                //         std::cout << "breakl" << std::endl;
+                //     }
+                //
+                //     reserve_set = new_reserve_set;
+                //     --reserve_count;
+                // }
+
+                // Initialize variables to keep track of agents to displace or promote
+                ssize_t agent_to_displace = -1;
+                ssize_t agent_to_promote = -1;
+
+                Allocation<A, I>& a = allocations[i];     // Current allocation
+                Allocation<A, I>& l = allocations[i - 1]; // Previous allocation
+
+                double efficient_price = calculate_efficient_price(l, a, epsilon, max_iter);
+
+                // Check if the efficient price exceeds the current agent's income
+                if (efficient_price + epsilon > a.agent.income()) {
+                    // Find the most preferred allocation for the current agent among those below
+                    size_t new_i = most_preferred(allocations,i, false, epsilon); // Do not search above because not yet allocated.
+                    agent_to_displace = new_i;
+                }
+
+                if (agent_to_displace == -1) {
+
+                    for (ssize_t j = i - 1; j >= 0; --j) {
+                        const Allocation<A, I>& prev = allocations[j];
+                        // Check if the previous agent prefers the current allocation at efficient price
+                        if (prev.agent.income() > efficient_price) {
+                            if (j < i - 1 && prev.agent.utility(efficient_price, a.quality()) > prev.utility + epsilon) {
+                                // Mark this agent to promote
+                                agent_to_promote = j;
+
+                                // Calculate the new efficient price by making this 'prev' agent indifferent.
+                                double new_price = calculate_efficient_price(prev, a, epsilon, max_iter);
+
+                                if (new_price > efficient_price) {
+                                    efficient_price = new_price;
+                                }
+                            }
+                        }
+                    }
+
+                    // Check if the efficient price exceeds the current agent's income
+                    if (efficient_price + epsilon > a.agent.income()) {
+                        // Find the most preferred allocation for the current agent among those below
+                        size_t new_i = most_preferred(allocations, i, false, epsilon); // Do not search above because not yet allocated.
+                        agent_to_displace = new_i;
+                    }
+
+                    if (agent_to_displace == -1) {
+                        // Check if this agent prefers any previous allocations
+                        double u_max = a.agent.utility(efficient_price, a.quality());
+
+                        if (isnan(u_max))
+                            return SolutionTick(SolutionResult::err_nan, i);
+                        for (ssize_t j = i - 1; j >= 0; --j) {
+                            const Allocation<A, I>& prev = allocations[j];
+                            // Check if the agent can afford the previous allocation
+                            if (a.agent.income() > prev.price + epsilon) {
+                                double u_prev = a.agent.utility(prev.price, prev.quality());
+                                if (isnan(u_prev))
+                                    return SolutionTick(SolutionResult::err_nan, i);
+                                if (u_prev > u_max + epsilon) {
+                                    // The current agent 'a' prefers 'prev''s allocation; mark 'prev' as the agent to displace.
+                                    u_max = u_prev;
+                                    agent_to_displace = j;
+                                }
+                            }
+                        }
+                        double efficient_utility = a.agent.utility(efficient_price, a.quality());
+                        // If no displacement is needed, update the current allocation's price and utility.
+                        if (agent_to_displace == -1) {
+                            if (efficient_price + epsilon > a.agent.income()) {
+                                // Find best place to move agent to.
+                                size_t new_i = most_preferred(allocations, i, false, epsilon); // Do not search above because not yet allocated.
+                                agent_to_displace = new_i;
+                                return SolutionTick::displace(new_i, i);
+                            } else {
+                                // Update the allocation with the efficient price and utility
+                                if (isnan(efficient_utility))
+                                    return SolutionTick(SolutionResult::err_nan, i);
+                            }
+                        }
+
+                        if (!isnan(efficient_utility)) {
+                            // Set price and util anyway.
+                            a.price = efficient_price;
+                            a.utility = efficient_utility;
+                        }
+                    }
+                }
+
+                if (agent_to_displace >= 0) {
+                    // Handle displacement or promotion of agents
+                    if (agent_to_promote >= 0) {
+                        // Displace the agent to the reserve area
+                        return SolutionTick::doublecross(i, agent_to_displace, agent_to_promote);
+                    } else {
+                        assert(agent_to_displace < i); // The agent to displace should be at a lower index.
+                        // Displace the current agent 'a' to position 'agent_to_displace', shifting other agents accordingly.
+                        return SolutionTick::displace(i, agent_to_displace);
+                    }
+                } else {
+                    // if (agent_to_promote >= 0) {
+                    //     return SolutionTick::promote(i, agent_to_promote);
+                    // }
+                    // The current allocation is successful, so we can move on to the next one.
+                    ++i;
+                }
+            }
+            return SolutionTick(SolutionResult::success, i);
+        }
+
+        static SolutionResult pull_back(std::vector<Allocation<A, I>> &allocations, size_t i, double epsilon, int max_iter = 100) {
+            for (;; --i) {
+                // Start with i-1.
+                Allocation<A, I>& a = allocations[i];     // Current allocation
+                Allocation<A, I>& l = allocations[i - 1]; // Previous allocation
+
+                // Only need to pull back if we prefer last.
+                if (a.agent.utility(l.price, l.quality()) > a.utility + epsilon) {
+                    // We want to swap!!!
+                    // Shift l up so that we dont want to switch to it.
+                    const double pulled_price = calculate_pulled_price(l, a, epsilon, max_iter);
+
+                    if (pulled_price > l.agent.income() - epsilon) {
+                        return SolutionResult::err_budget_constraint;
+                    }
+                    l.price = pulled_price;
+                } else {
+                    return SolutionResult::success;
+                }
+            }
+        }
+
 
         ///
         /// @brief Adjusts prices to ensure that no agent prefers another allocation.

@@ -16,452 +16,322 @@ typedef long int ssize_t;
 // Placeholder for peris::Allocation
 namespace peris {
 
+    enum RenderCommand : int {
+        terminate = 0,
+        none = 1,
+        pause = 2,
+        tick = 3,
+        skip = 4,
+        enable_swap_always = 5,
+    };
+
     // Template class RenderState
     template<typename A, typename I>
     class RenderState {
     public:
         // Constructor
-        inline RenderState(const std::vector<peris::Allocation<A, I>>& allocations);
-
-        // Update rendering data for changed allocations
-        inline void update_allocations(const std::vector<peris::Allocation<A, I>>& new_allocations);
+        inline RenderState();
 
         // Draw allocations
-        inline bool draw_allocations(const std::vector<peris::Allocation<A, I>>& new_allocations, int current_idx);
+        inline RenderCommand draw_allocations(const std::vector<peris::Allocation<A, I>>& allocations, int current_idx);
 
         // Public window field (if needed outside)
         sf::RenderWindow window;
 
     private:
-        int downtime = 1;
-
         // Fields
         sf::Font font;
 
-        // Precomputed rendering data
-        std::vector<sf::VertexArray> indifference_curves;
-        std::vector<sf::CircleShape> allocation_circles;
+        // View for zooming and panning
+        sf::View view;
 
-        // Axes and labels (assumed static)
-        sf::VertexArray axes;
-        std::vector<sf::Text> axis_labels;
-        std::vector<sf::VertexArray> ticks;
-        std::vector<sf::Text> tick_labels;
+        // Zoom level
+        float zoom_level = 1.0f;
 
-        // Coordinate transformations
-        double x_min, x_max, y_min, y_max;
-        double x_min_base, x_max_base, y_min_base, y_max_base;
-        double x_scale, y_scale;
-        double x_axis_y, y_axis_x;
+        // Panning variables
+        bool is_panning = false;
+        sf::Vector2i last_mouse_position;
 
-        double epsilon = 1e-4;
+        // Data area for initial view setup
+        sf::FloatRect data_area;
+        bool view_initialized = false;
 
-        // Store previous allocations for comparison
-        std::vector<peris::Allocation<A, I>> old_allocations;
-
-        // Helper methods
-        inline void compute_coordinate_transformations(const std::vector<peris::Allocation<A, I>>& allocations);
+        // Coordinate bounds
+        float x_min, x_max, y_min, y_max;
     };
 
     // Implementation of RenderState methods
 
     template<typename A, typename I>
-    inline RenderState<A, I>::RenderState(const std::vector<peris::Allocation<A, I>>& allocations)
-        : old_allocations(allocations), window(sf::VideoMode(1500, 1000), "Pareto Efficient Relative Investment Solver (PERIS)") {
+    inline RenderState<A, I>::RenderState()
+        : window(sf::VideoMode(1500, 1000), "Pareto Efficient Relative Investment Solver (PERIS)") {
         // Load font
         if (!font.loadFromFile("Arial.ttf")) {
             std::cerr << "Error loading font!" << std::endl;
             // Handle error appropriately
         }
-
-        // Compute coordinate transformations and axes
-        compute_coordinate_transformations(allocations);
-
-        // Precompute indifference curves and allocation circles
-        for (const auto& a : allocations) {
-            // Indifference Curve
-            sf::VertexArray curve(sf::LineStrip);
-
-            for (double x = x_min; x <= a.agent.income(); x += 0.05f) {
-
-                double x_use;
-                if (x > a.agent.income()) {
-                     x_use = a.agent.income() - epsilon;
-                } else {
-                    x_use = x;
-                }
-
-                double y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
-
-                if (!std::isnan(y) && y >= y_min && y <= y_max) {
-                    double screen_x = (x - x_min) * x_scale;
-                    double screen_y = window.getSize().y - (y - y_min) * y_scale;
-                    curve.append(sf::Vertex(sf::Vector2f(screen_x, screen_y), sf::Color::Red));
-                }
-            }
-            indifference_curves.push_back(curve);
-
-            // Allocation Circle
-            double screen_x = (a.price - x_min) * x_scale;
-            double screen_y = window.getSize().y - (a.quality() - y_min) * y_scale;
-
-            sf::CircleShape circle(5);
-            circle.setFillColor(sf::Color::Blue);
-            circle.setPosition(screen_x - 5, screen_y - 5);
-
-            allocation_circles.push_back(circle);
-        }
     }
 
     template<typename A, typename I>
-    inline void RenderState<A, I>::compute_coordinate_transformations(const std::vector<peris::Allocation<A, I>>& allocations) {
-        // Compute bounds based on allocations
-        x_min_base = 0.f;
-        x_max_base = allocations.back().price;
-        y_min_base = 0.f;
-        y_max_base = allocations.back().quality();
+    inline RenderCommand RenderState<A, I>::draw_allocations(const std::vector<peris::Allocation<A, I>>& allocations, int current_idx) {
+        // Compute coordinate bounds based on allocations
+        if (allocations.empty()) {
+            return RenderCommand::none;
+        }
 
-        for (auto& a : allocations) {
-            double x = a.price;
-            double y = a.quality();
+        x_min = allocations.front().price;
+        x_max = allocations.front().price;
+        y_min = allocations.front().quality();
+        y_max = allocations.front().quality();
 
-            if (x > x_max_base) {
-                x_max_base = x;
-            }
+        for (const auto& a : allocations) {
+            float x = a.price;
+            float y = a.quality();
 
-            if (y > y_max_base) {
-                y_max_base = y;
-            }
+            if (x < x_min) x_min = x;
+            if (x > x_max) x_max = x;
+            if (y < y_min) y_min = y;
+            if (y > y_max) y_max = y;
         }
 
         // Add padding
-        double x_padding = std::abs(x_max_base - x_min_base) * 0.1f;
-        double y_padding = std::abs(y_max_base - y_min_base) * 0.05f;
+        float x_padding = std::abs(x_max - x_min) * 0.1f;
+        float y_padding = std::abs(y_max - y_min) * 0.1f;
 
-        x_min = x_min_base - x_padding;
-        y_min = y_min_base - y_padding;
-        x_max = x_max_base + x_padding;
-        y_max = y_max_base + y_padding;
+        x_min -= x_padding;
+        x_max += x_padding;
+        y_min -= y_padding;
+        y_max += y_padding;
 
-        // Compute scales
-        x_scale = window.getSize().x / (x_max - x_min);
-        y_scale = window.getSize().y / (y_max - y_min);
+        // Flip y_min and y_max to account for inverted drawing
+        std::swap(y_min, y_max);
+        y_min = -y_min;
+        y_max = -y_max;
 
-        // Precompute axes positions
-        if (y_min <= 0 && y_max >= 0) {
-            x_axis_y = window.getSize().y - (-y_min) * y_scale;
-        } else {
-            x_axis_y = window.getSize().y - (0 - y_min) * y_scale;
+        // Set data area for the view
+        data_area = sf::FloatRect(x_min, y_min, x_max - x_min, y_max - y_min);
+
+        // Initialize view if not already done
+        if (!view_initialized) {
+            view.reset(sf::FloatRect(x_min, y_min, x_max - x_min, y_max - y_min));
+            view_initialized = true;
         }
 
-        if (x_min <= 0 && x_max >= 0) {
-            y_axis_x = (-x_min) * x_scale;
-        } else {
-            y_axis_x = (0 - x_min) * x_scale;
-        }
-
-        // Precompute axes
-        axes.clear();
-        axes.setPrimitiveType(sf::Lines);
-        axes.append(sf::Vertex(sf::Vector2f(0, x_axis_y), sf::Color::Black));
-        axes.append(sf::Vertex(sf::Vector2f(window.getSize().x, x_axis_y), sf::Color::Black));
-        axes.append(sf::Vertex(sf::Vector2f(y_axis_x, 0), sf::Color::Black));
-        axes.append(sf::Vertex(sf::Vector2f(y_axis_x, window.getSize().y), sf::Color::Black));
-
-        // Precompute axis labels
-        axis_labels.clear();
-        sf::Text x_label("Price", font, 14);
-        x_label.setFillColor(sf::Color::Black);
-        x_label.setPosition(window.getSize().x - 50, x_axis_y - 20);
-        axis_labels.push_back(x_label);
-
-        sf::Text y_label("Quality", font, 14);
-        y_label.setFillColor(sf::Color::Black);
-        y_label.setPosition(y_axis_x + 5, 5);
-        axis_labels.push_back(y_label);
-
-        // Helper function to calculate 'nice' numbers for intervals
-        auto calculate_nice_number = [](double range, bool round) {
-            double exponent = std::floor(std::log10(range));
-            double fraction = range / std::pow(10, exponent);
-
-            double nice_fraction;
-            if (round) {
-                if (fraction < 1.5f)
-                    nice_fraction = 1.0f;
-                else if (fraction < 3.0f)
-                    nice_fraction = 2.0f;
-                else if (fraction < 7.0f)
-                    nice_fraction = 5.0f;
-                else
-                    nice_fraction = 10.0f;
-            } else {
-                if (fraction <= 1.0f)
-                    nice_fraction = 1.0f;
-                else if (fraction <= 2.0f)
-                    nice_fraction = 2.0f;
-                else if (fraction <= 5.0f)
-                    nice_fraction = 5.0f;
-                else
-                    nice_fraction = 10.0f;
-            }
-
-            return nice_fraction * std::pow(10, exponent);
-        };
-
-        // Precompute ticks and labels
-        ticks.clear();
-        tick_labels.clear();
-
-        // X-axis ticks
-        int desired_x_ticks = 5;
-        double x_range = x_max - x_min;
-        double x_tick_interval = calculate_nice_number(x_range / (desired_x_ticks - 1), true);
-        double x_nice_min = std::floor(x_min / x_tick_interval) * x_tick_interval;
-        double x_nice_max = std::ceil(x_max / x_tick_interval) * x_tick_interval;
-
-        for (double x_value = x_nice_min; x_value <= x_nice_max; x_value += x_tick_interval) {
-            double screen_x = (x_value - x_min) * x_scale;
-
-            // Tick marks
-            sf::VertexArray tick(sf::Lines, 2);
-            tick[0] = sf::Vertex(sf::Vector2f(screen_x, x_axis_y - 5), sf::Color::Black);
-            tick[1] = sf::Vertex(sf::Vector2f(screen_x, x_axis_y + 5), sf::Color::Black);
-            ticks.push_back(tick);
-
-            // Labels
-            std::ostringstream ss;
-            ss << std::fixed << std::setprecision(2) << x_value;
-            sf::Text label(ss.str(), font, 12);
-            label.setFillColor(sf::Color::Black);
-            label.setPosition(screen_x - 15, x_axis_y + 10);
-            tick_labels.push_back(label);
-        }
-
-        // Y-axis ticks
-        int desired_y_ticks = 5;
-        double y_range = y_max - y_min;
-        double y_tick_interval = calculate_nice_number(y_range / (desired_y_ticks - 1), true);
-        double y_nice_min = std::floor(y_min / y_tick_interval) * y_tick_interval;
-        double y_nice_max = std::ceil(y_max / y_tick_interval) * y_tick_interval;
-
-        for (double y_value = y_nice_min; y_value <= y_nice_max; y_value += y_tick_interval) {
-            double screen_y = window.getSize().y - (y_value - y_min) * y_scale;
-
-            // Tick marks
-            sf::VertexArray tick(sf::Lines, 2);
-            tick[0] = sf::Vertex(sf::Vector2f(y_axis_x - 5, screen_y), sf::Color::Black);
-            tick[1] = sf::Vertex(sf::Vector2f(y_axis_x + 5, screen_y), sf::Color::Black);
-            ticks.push_back(tick);
-
-            // Labels
-            std::ostringstream ss;
-            ss << std::fixed << std::setprecision(2) << y_value;
-            sf::Text label(ss.str(), font, 12);
-            label.setFillColor(sf::Color::Black);
-            label.setPosition(y_axis_x - 50, screen_y - 10);
-            tick_labels.push_back(label);
-        }
-    }
-
-    template<typename A, typename I>
-    inline void RenderState<A, I>::update_allocations(const std::vector<peris::Allocation<A, I>>& new_allocations) {
-        // Update coordinate transformations
-        compute_coordinate_transformations(new_allocations);
-
-        // Ensure the sizes are the same
-        if (new_allocations.size() != old_allocations.size()) {
-            // If sizes differ, we need to recompute all rendering data
-            old_allocations = new_allocations;
-            indifference_curves.clear();
-            allocation_circles.clear();
-
-            // Recompute all
-            for (size_t i = 0; i < new_allocations.size(); ++i) {
-                const auto& a = new_allocations[i];
-
-                // Indifference Curve
-                sf::VertexArray curve(sf::LineStrip);
-
-                for (double x = x_min; x <= x_max; x += 0.05f) {
-                    double x_use;
-                    if (x > a.agent.income()) {
-                        x_use = a.agent.income() - epsilon;
-                    } else {
-                        x_use = x;
-                    }
-
-                    double y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
-
-                    if (!std::isnan(y) && y >= y_min && y <= y_max) {
-                        double screen_x = (x - x_min) * x_scale;
-                        double screen_y = window.getSize().y - (y - y_min) * y_scale;
-                        curve.append(sf::Vertex(sf::Vector2f(screen_x, screen_y), sf::Color::Red));
-                    }
-                }
-                indifference_curves.push_back(curve);
-
-                // Allocation Circle
-                double screen_x = (a.price - x_min) * x_scale;
-                double screen_y = window.getSize().y - (a.quality() - y_min) * y_scale;
-
-                sf::CircleShape circle(5);
-                circle.setFillColor(sf::Color::Blue);
-                circle.setPosition(screen_x - 5, screen_y - 5);
-
-                allocation_circles.push_back(circle);
-            }
-            return;
-        }
-
-        // Compare new allocations with old ones
-        for (size_t i = 0; i < new_allocations.size(); ++i) {
-            const auto& new_alloc = new_allocations[i];
-            const auto& old_alloc = old_allocations[i];
-
-            // Update allocation in old_allocations
-            old_allocations[i] = new_alloc;
-
-            // Recompute indifference curve
-            sf::VertexArray curve(sf::LineStrip);
-
-            const auto& a = new_alloc;
-            for (double x = x_min; x <= x_max; x += 0.05f) {
-                double x_use;
-                if (x > a.agent.income()) {
-                    x_use = a.agent.income() - epsilon;
-                } else {
-                    x_use = x;
-                }
-
-                double y = indifferent_quality(a.agent, x, a.utility, y_min, y_max, epsilon);
-
-                if (!std::isnan(y) && y >= y_min && y <= y_max) {
-                    double screen_x = (x - x_min) * x_scale;
-                    double screen_y = window.getSize().y - (y - y_min) * y_scale;
-                    curve.append(sf::Vertex(sf::Vector2f(screen_x, screen_y), sf::Color::Red));
-                }
-            }
-            indifference_curves[i] = curve;
-
-            // Recompute allocation circle
-            double screen_x = (new_alloc.price - x_min) * x_scale;
-            double screen_y = window.getSize().y - (new_alloc.quality() - y_min) * y_scale;
-
-            allocation_circles[i].setPosition(screen_x - 5, screen_y - 5);
-        }
-    }
-
-    template<typename A, typename I>
-    inline bool RenderState<A, I>::draw_allocations(const std::vector<peris::Allocation<A, I>>& new_allocations, int current_idx) {
-        // Update allocations
-        update_allocations(new_allocations);
+        RenderCommand rc = RenderCommand::none;
 
         // Process events
         sf::Event event{};
         while (window.pollEvent(event)) {
+            // Close window if requested
             if (event.type == sf::Event::Closed) {
                 window.close();
-                return false;
+                return RenderCommand::terminate;
+            }
+
+            if (event.type == sf::Event::KeyPressed) {
+                if (event.key.code == sf::Keyboard::T) {
+                    rc = RenderCommand::tick;
+                } else if (event.key.code == sf::Keyboard::P) {
+                    rc = RenderCommand::pause;
+                } else if (event.key.code == sf::Keyboard::S) {
+                    rc = RenderCommand::skip;
+                } else if (event.key.code == sf::Keyboard::E) {
+                    rc = RenderCommand::enable_swap_always;
+                }
+            }
+
+            // Handle zooming with mouse wheel
+            if (event.type == sf::Event::MouseWheelScrolled) {
+                if (event.mouseWheelScroll.wheel == sf::Mouse::VerticalWheel) {
+                    float delta = event.mouseWheelScroll.delta;
+                    // Update zoom level
+                    if (delta > 0) {
+                        zoom_level *= 0.9f; // Zoom in
+                    } else if (delta < 0) {
+                        zoom_level *= 1.1f; // Zoom out
+                    }
+                    // Limit zoom level
+                    //if (zoom_level < 0.1f) zoom_level = 0.1f;
+
+                    // Update view size
+                    sf::Vector2f new_size = sf::Vector2f((x_max - x_min) * zoom_level, (y_max - y_min) * zoom_level);
+                    view.setSize(new_size);
+                }
+            }
+
+            // Handle panning with right mouse button
+            if (event.type == sf::Event::MouseButtonPressed) {
+                if (event.mouseButton.button == sf::Mouse::Right) {
+                    is_panning = true;
+                    last_mouse_position = sf::Mouse::getPosition(window);
+                }
+            }
+
+            if (event.type == sf::Event::MouseButtonReleased) {
+                if (event.mouseButton.button == sf::Mouse::Right) {
+                    is_panning = false;
+                }
+            }
+
+            if (event.type == sf::Event::MouseMoved) {
+                if (is_panning) {
+                    sf::Vector2i new_mouse_position = sf::Mouse::getPosition(window);
+                    sf::Vector2f old_pos = window.mapPixelToCoords(last_mouse_position, view);
+                    sf::Vector2f new_pos = window.mapPixelToCoords(new_mouse_position, view);
+                    sf::Vector2f delta = old_pos - new_pos;
+                    view.move(delta);
+                    last_mouse_position = new_mouse_position;
+                }
             }
         }
 
-        // Clear the window
+        // Set the updated view
+        window.setView(view);
+
+        // Calculate the scale factors to correct circle scaling
+        float scale_x = window.getSize().x / view.getSize().x;
+        float scale_y = window.getSize().y / view.getSize().y;
+        float aspect_ratio = scale_y / scale_x;
+
+        // Clear the window with a white background
         window.clear(sf::Color::White);
 
-        // Get the mouse position
-        sf::Vector2i mouse_position = sf::Mouse::getPosition(window);
-        int hovered_allocation_index = -1;
+        // Draw indifference curves and allocation circles
+        for (size_t i = 0; i < allocations.size(); ++i) {
+            const Allocation<A, I>& a = allocations[i];
+            sf::VertexArray curve(sf::LineStrip);
 
-        // Determine if the mouse is over any allocation point
-        for (size_t i = 0; i < allocation_circles.size(); ++i) {
-            sf::CircleShape& circle = allocation_circles[i];
+            // Sample points along x-axis to plot the curve
+            int num_samples = 500;
+            for (int j = 0; j <= num_samples; ++j) {
+                float x = x_min + j * (x_max - x_min) / num_samples;
+                // Find y such that U(x, y) = U0
+                float y = indifferent_quality(a.agent, x, a.utility, -y_max, -y_min);
 
-            // Get the circle's position and radius
-            sf::Vector2f position = circle.getPosition();
-            double radius = circle.getRadius();
-
-            // Adjust position to center
-            position.x += radius;
-            position.y += radius;
-
-            // Calculate distance
-            double dx = mouse_position.x - position.x;
-            double dy = mouse_position.y - position.y;
-            double distance = std::sqrt(dx * dx + dy * dy);
-
-            if (distance <= radius) {
-                hovered_allocation_index = static_cast<int>(i);
-                break;
-            }
-        }
-
-        // Draw indifference curves
-        for (size_t i = 0; i < indifference_curves.size(); ++i) {
-            sf::Color curve_color = (static_cast<int>(i) == hovered_allocation_index) ? sf::Color::Cyan : sf::Color::Red;
-
-            if (current_idx >= 0) {
-                  if (i > current_idx) {
-                      curve_color = sf::Color::Transparent;
-                  } else if (i == current_idx) {
-                      curve_color = sf::Color::Green;
-                  }
-
-            }
-
-            sf::VertexArray& curve = indifference_curves[i];
-
-            // Update color
-            for (size_t j = 0; j < curve.getVertexCount(); ++j) {
-                curve[j].color = curve_color;
+                // Check if y is valid
+                if (!std::isnan(y) && y >= -y_max && y <= -y_min) {
+                    auto color = (int)i == current_idx ? sf::Color::Green : sf::Color::Red;
+                    curve.append(sf::Vertex(sf::Vector2f(x, -y), color));
+                }
             }
             window.draw(curve);
         }
 
         // Draw allocation circles
-        for (size_t i = 0; i < allocation_circles.size(); ++i) {
-            sf::Color circle_color = (static_cast<int>(i) == hovered_allocation_index) ? sf::Color::Cyan : sf::Color::Blue;
-            sf::CircleShape& circle = allocation_circles[i];
-            circle.setFillColor(circle_color);
+        for (size_t i = 0; i < allocations.size(); ++i) {
+            const Allocation<A, I>& a = allocations[i];
+
+            float x = a.price;
+            float y = -a.quality();
+
+            float circle_radius = 0.008f * zoom_level; // Adjust circle size inversely proportional to zoom level
+            sf::CircleShape circle(circle_radius);
+            auto color = i == current_idx ? sf::Color::Cyan : sf::Color::Blue;
+            circle.setFillColor(color);
+            circle.setOrigin(circle.getRadius(), circle.getRadius()); // Center the circle
+            circle.setPosition(x, y);
+
+            // Adjust the circle's scale to correct aspect ratio
+            circle.setScale(aspect_ratio, 1.0f);
+
             window.draw(circle);
         }
 
-        // Optionally, display agent information when hovered
-        if (hovered_allocation_index >= 0) {
-            const auto& a = new_allocations[hovered_allocation_index];
-
-            std::ostringstream info;
-            info << "i=" << hovered_allocation_index << "\np=" << a.price << "\ne=" << a.item.quality() << "\nu=" << a.agent.utility(a.price, a.item.quality()) << "\nu_old=" << a.utility << "\n" << a.agent.debug_info();
-            sf::Text agent_info(info.str(), font, 14);
-            agent_info.setFillColor(sf::Color::Black);
-            agent_info.setPosition(mouse_position.x + 10, mouse_position.y + 10);
-            window.draw(agent_info);
-        }
-
         // Draw axes
-        window.draw(axes);
+        {
+            sf::VertexArray axes(sf::Lines);
 
-        // Draw axis labels
-        for (const auto& label : axis_labels) {
-            window.draw(label);
-        }
+            // X-axis (horizontal line at y = 0)
+            if (-y_min <= 0 && -y_max >= 0) {
+                axes.append(sf::Vertex(sf::Vector2f(x_min, 0), sf::Color::Black));
+                axes.append(sf::Vertex(sf::Vector2f(x_max, 0), sf::Color::Black));
+            }
 
-        // Draw ticks
-        for (const auto& tick : ticks) {
-            window.draw(tick);
-        }
+            // Y-axis (vertical line at x = 0)
+            if (x_min <= 0 && x_max >= 0) {
+                axes.append(sf::Vertex(sf::Vector2f(0, -y_min), sf::Color::Black));
+                axes.append(sf::Vertex(sf::Vector2f(0, -y_max), sf::Color::Black));
+            }
 
-        // Draw tick labels
-        for (const auto& label : tick_labels) {
-            window.draw(label);
+            window.draw(axes);
+
+            // Draw axis labels and ticks in screen coordinates
+            // Reset the view temporarily
+            window.setView(window.getDefaultView());
+
+            // X-axis label
+            sf::Text x_label("Price", font, 14);
+            x_label.setFillColor(sf::Color::Black);
+            x_label.setPosition(window.getSize().x - 70, window.getSize().y - 30); // Adjust position as needed
+            window.draw(x_label);
+
+            // Y-axis label
+            sf::Text y_label("Quality", font, 14);
+            y_label.setFillColor(sf::Color::Black);
+            y_label.setPosition(10, 10); // Adjust position as needed
+            window.draw(y_label);
+
+            // Draw tick marks and labels
+            // X-axis ticks
+            int desired_x_ticks = 10;
+            float x_range = x_max - x_min;
+            float x_tick_interval = x_range / desired_x_ticks;
+
+            for (int i = 0; i <= desired_x_ticks; ++i) {
+                float x_value = x_min + i * x_tick_interval;
+                sf::Vector2f world_pos(x_value, 0);
+                sf::Vector2f screen_pos = sf::Vector2f(window.mapCoordsToPixel(world_pos, view));
+
+                // Draw tick
+                sf::RectangleShape tick(sf::Vector2f(1, 5));
+                tick.setFillColor(sf::Color::Black);
+                tick.setPosition(screen_pos.x, screen_pos.y);
+                window.draw(tick);
+
+                // Draw label
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(2) << x_value;
+                sf::Text label(ss.str(), font, 12);
+                label.setFillColor(sf::Color::Black);
+                label.setPosition(screen_pos.x - 15, screen_pos.y + 5);
+                window.draw(label);
+            }
+
+            // Y-axis ticks
+            int desired_y_ticks = 10;
+            float y_range = -y_max - (-y_min);
+            float y_tick_interval = y_range / desired_y_ticks;
+
+            for (int i = 0; i <= desired_y_ticks; ++i) {
+                float y_value = -y_max + i * y_tick_interval;
+                sf::Vector2f world_pos(0, y_value);
+                sf::Vector2f screen_pos = sf::Vector2f(window.mapCoordsToPixel(world_pos, view));
+
+                // Draw tick
+                sf::RectangleShape tick(sf::Vector2f(5, 1));
+                tick.setFillColor(sf::Color::Black);
+                tick.setPosition(screen_pos.x - 5, screen_pos.y);
+                window.draw(tick);
+
+                // Draw label
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(2) << -y_value;
+                sf::Text label(ss.str(), font, 12);
+                label.setFillColor(sf::Color::Black);
+                label.setPosition(screen_pos.x - 50, screen_pos.y - 10);
+                window.draw(label);
+            }
+
+            // Restore the view
+            window.setView(view);
         }
 
         // Display the current frame
         window.display();
-        sf::sleep(sf::microseconds(downtime));
 
-        return true;
+        return rc;
     }
-}
+
+} // namespace peris
 
 #endif // RENDER_H
