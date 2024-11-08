@@ -11,11 +11,11 @@ peris::Solver<Household, House> World::solver(double guess_factor) {
 
 bool World::validate() {
     for (auto& a : this->households) {
-        if (a.aspiration < 0.0 || a.aspiration > 1.0 || a.inc <= 0.0)
+        if (a.aspiration <= 0.05 || a.aspiration >= 0.95 || a.inc <= 0.5)
             return false;
     }
     for (auto& s : this->schools) {
-        if (s.quality <= 0.0)
+        if (s.quality <= 0.05)
             return false;
     }
 

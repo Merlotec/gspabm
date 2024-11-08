@@ -23,6 +23,7 @@ namespace peris {
         tick = 3,
         skip = 4,
         enable_swap_always = 5,
+        enable_doublecross = 6,
     };
 
     // Template class RenderState
@@ -58,6 +59,9 @@ namespace peris {
 
         // Coordinate bounds
         float x_min, x_max, y_min, y_max;
+
+        // Index of the hovered allocation
+        int hovered_idx = -1;
     };
 
     // Implementation of RenderState methods
@@ -137,6 +141,8 @@ namespace peris {
                     rc = RenderCommand::skip;
                 } else if (event.key.code == sf::Keyboard::E) {
                     rc = RenderCommand::enable_swap_always;
+                } else if (event.key.code == sf::Keyboard::D) {
+                    rc = RenderCommand::enable_doublecross;
                 }
             }
 
@@ -181,6 +187,44 @@ namespace peris {
                     sf::Vector2f delta = old_pos - new_pos;
                     view.move(delta);
                     last_mouse_position = new_mouse_position;
+                } else {
+                    // Handle hover detection
+                    sf::Vector2i pixel_pos = sf::Mouse::getPosition(window);
+                    sf::Vector2f world_pos = window.mapPixelToCoords(pixel_pos, view);
+
+                    hovered_idx = -1; // Reset hovered index
+
+                    // Calculate the scale factors to correct circle scaling
+                    float scale_x = window.getSize().x / view.getSize().x;
+                    float scale_y = window.getSize().y / view.getSize().y;
+                    float aspect_ratio = scale_y / scale_x;
+
+                    // Check if mouse is over any circle
+                    for (size_t i = 0; i < allocations.size(); ++i) {
+                        const Allocation<A, I>& a = allocations[i];
+                        float x = a.price;
+                        float y = -a.quality();
+
+                        float circle_radius = 0.008f * zoom_level;
+                        sf::Vector2f circle_pos(x, y);
+
+                        // Adjust circle radius for aspect ratio
+                        float adjusted_radius_x = circle_radius * aspect_ratio;
+                        float adjusted_radius_y = circle_radius;
+
+                        // Check if mouse is within the circle
+                        sf::FloatRect circle_bounds(
+                            circle_pos.x - adjusted_radius_x,
+                            circle_pos.y - adjusted_radius_y,
+                            adjusted_radius_x * 2,
+                            adjusted_radius_y * 2
+                        );
+
+                        if (circle_bounds.contains(world_pos)) {
+                            hovered_idx = static_cast<int>(i);
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -210,7 +254,13 @@ namespace peris {
 
                 // Check if y is valid
                 if (!std::isnan(y) && y >= -y_max && y <= -y_min) {
-                    auto color = (int)i == current_idx ? sf::Color::Green : sf::Color::Red;
+                    sf::Color color = (int)i == current_idx ? sf::Color::Green : sf::Color::Red;
+
+                    // Highlight the curve if hovered
+                    if ((int)i == hovered_idx) {
+                        color = sf::Color(0, 0, 120); // Orange color
+                    }
+
                     curve.append(sf::Vertex(sf::Vector2f(x, -y), color));
                 }
             }
@@ -226,7 +276,12 @@ namespace peris {
 
             float circle_radius = 0.008f * zoom_level; // Adjust circle size inversely proportional to zoom level
             sf::CircleShape circle(circle_radius);
-            auto color = i == current_idx ? sf::Color::Cyan : sf::Color::Blue;
+
+            // Highlight the circle if hovered
+            sf::Color color = (int)i == hovered_idx ? sf::Color(255, 165, 0) : sf::Color::Blue; // Orange or Blue
+            if (i == current_idx) {
+                color = sf::Color::Cyan;
+            }
             circle.setFillColor(color);
             circle.setOrigin(circle.getRadius(), circle.getRadius()); // Center the circle
             circle.setPosition(x, y);
@@ -235,6 +290,16 @@ namespace peris {
             circle.setScale(aspect_ratio, 1.0f);
 
             window.draw(circle);
+
+            // Draw orange line from the circle to x-axis if hovered
+            if ((int)i == hovered_idx) {
+                sf::VertexArray line(sf::Lines, 2);
+                line[0].position = sf::Vector2f(x, y);
+                line[1].position = sf::Vector2f(x, 0); // Line to x-axis (y=0)
+                line[0].color = sf::Color(255, 165, 0); // Orange color
+                line[1].color = sf::Color(255, 165, 0);
+                window.draw(line);
+            }
         }
 
         // Draw axes
@@ -324,6 +389,46 @@ namespace peris {
 
             // Restore the view
             window.setView(view);
+
+            // Draw text below the cursor if hovering over an allocation
+            if (hovered_idx != -1) {
+                // Get agent information
+                const Allocation<A, I>& hovered_allocation = allocations[hovered_idx];
+                std::ostringstream info_ss;
+                info_ss << "n =" << hovered_idx << std::endl;
+                info_ss << "id=" << hovered_allocation.agent.item_id() << std::endl;
+                info_ss << hovered_allocation.agent.debug_info() << std::endl;
+                info_ss << "p =" << hovered_allocation.price << std::endl;
+                info_ss << "q =" << hovered_allocation.quality() << std::endl;
+                info_ss << "u =" << hovered_allocation.utility << std::endl;
+                info_ss << "ur=" << hovered_allocation.agent.utility(hovered_allocation.price, hovered_allocation.quality()) << std::endl;
+                info_ss << "dc=" << hovered_allocation.doublecross << std::endl;
+                // You can add more agent-specific information here
+
+                // Set up text
+                sf::Text info_text(info_ss.str(), font, 14);
+                info_text.setFillColor(sf::Color::Black);
+
+                // Get mouse position
+                sf::Vector2i pixel_pos = sf::Mouse::getPosition(window);
+                sf::Vector2f info_pos(pixel_pos.x + 10, pixel_pos.y + 10); // Offset from cursor
+
+                // Ensure the text does not go off-screen
+                sf::FloatRect text_bounds = info_text.getLocalBounds();
+                if (info_pos.x + text_bounds.width > window.getSize().x) {
+                    info_pos.x -= text_bounds.width + 20;
+                }
+                if (info_pos.y + text_bounds.height > window.getSize().y) {
+                    info_pos.y -= text_bounds.height + 20;
+                }
+
+                info_text.setPosition(info_pos);
+
+                // Draw the text
+                window.setView(window.getDefaultView()); // Ensure text is drawn in screen coordinates
+                window.draw(info_text);
+                window.setView(view); // Restore the view
+            }
         }
 
         // Display the current frame

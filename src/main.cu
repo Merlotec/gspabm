@@ -29,11 +29,11 @@ World create_world(const size_t school_count, const size_t house_count) {
 
     std::normal_distribution<double> school_quality_distribution(0.8, 0.28);
     std::normal_distribution<double> ability_distribution(0, 1.0);
-    std::normal_distribution<double> aspiration_distribution(0.6, 0.18);
+    std::normal_distribution<double> aspiration_distribution(0.55, 0.12);
 
     constexpr double mean_household_inc = 100.0;
 
-    double cv = 0.3; // Adjusts variance and skewness of distribution
+    double cv = 0.4; // Adjusts variance and skewness of distribution
     double variance = (cv * mean_household_inc) * (cv * mean_household_inc);
     double standard_deviation = std::sqrt(variance);
 
@@ -99,12 +99,10 @@ World create_world(const size_t school_count, const size_t house_count) {
     std::cout << "Allocated houses: " << allocated_houses.size() << std::endl;
     assert(allocated_houses.size() == house_count);
 
-
-
     for (int i = 0; i < house_count; ++i) {
         const double income = household_income_distribution(gen);
         const double ability = ability_distribution(gen);
-        const double aspiration = aspiration_distribution(gen);
+        const double aspiration = aspiration_distribution(gen);// > 0.7 ? 0.7 : 0.8;
 
         const Household household = {.id = i, .inc = income, .ability = ability, .aspiration = aspiration, .school = -1, .house = -1 };
         households.push_back(household);
@@ -188,8 +186,8 @@ __global__ void determine_bids(Household* households, int household_count, Schoo
 }
 
 int main() {
-    constexpr size_t school_count = 300;
-    constexpr size_t house_count = 300;
+    constexpr size_t school_count = 400;
+    constexpr size_t house_count = 400;
 
     std::cout << "Creating with " << school_count << " schools" << " and " << house_count << " houses" << std::endl;
 
@@ -223,6 +221,12 @@ int main() {
 
     solver.regress_price_on_quality();
 
-    while (solver.draw(&render_state)) {}
+    peris::RenderCommand cmd;
+    while ((cmd = solver.draw(&render_state)) >= 0) {
+        if (cmd == peris::tick) {
+            for (int i = 0; i < 100; ++i)
+                solver.equilibriate_demand(0.01);
+        }
+    }
     return 0;
 }

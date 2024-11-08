@@ -46,7 +46,9 @@ namespace peris {
 
         /// Indicates a household that cannot be at this index (given a previous invalidation).
         /// If it allocated here we know we would experience an infinite loop.
-        int blacklist_id = -1;
+        bool doublecross = false;
+
+        size_t favourite = 0;
 
         double quality() const {
             return item.quality();

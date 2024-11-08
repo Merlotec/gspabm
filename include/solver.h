@@ -279,7 +279,7 @@ namespace peris {
         ///
         /// @return A SolutionResult indicating success or type of error.
         ///
-        SolutionResult solve(RenderState<A, I>* render_state, double epsilon = 1e-5, int max_iter = 200) {
+        SolutionResult solve(RenderState<A, I>* render_state, double epsilon = 1e-5, int max_iter = 400) {
             // If there are no agents, return success.
             if (allocations.empty()) {
                 return SolutionResult::success;
@@ -324,6 +324,10 @@ namespace peris {
             std::vector<Allocation<A, I>> savestate{};
             size_t try_offset = 0;
 
+            bool try_swap = false;
+
+            bool enable_doublecross = false;
+
             while (true) {
                 if (render_state != nullptr) {
                     if (to_skip > 0) {
@@ -343,6 +347,10 @@ namespace peris {
                             }
                         }
 
+                        if (rc == RenderCommand::enable_doublecross) {
+                            enable_doublecross = !enable_doublecross;
+                        }
+
                         if (rc == RenderCommand::skip) {
                             to_skip = 100;
                         }
@@ -358,7 +366,7 @@ namespace peris {
                 }
 
                 // Align
-                tick = try_align(allocations, i, allocations.size() - reserve, epsilon, max_iter);
+                tick = try_align(allocations, i, allocations.size() - reserve, 0.f, epsilon, max_iter);
 
                 if (tick.result == SolutionResult::success) {
                     if (reserve == 0) {
@@ -376,7 +384,8 @@ namespace peris {
                         displace_up(allocations, r, pref);
                         doublecross_idx = pref; // So that we know what to use as the current double-cross target.
                         doublecross_id = allocations[pref].agent.item_id();
-                        i = pref;
+                        allocations[pref].doublecross = true;
+                        i = pref + 1;
                         savestate = std::vector<Allocation<A, I>>(allocations); // Clone existing state.
                         try_offset = 0; // Reset this because we are allocating a new reserve agent.
                         --reserve;
@@ -390,7 +399,7 @@ namespace peris {
 
                 if (tick.agent_to_displace != -1) {
                     if (tick.agent_to_promote != -1) {
-                        if (tick.agent_to_promote <= doublecross_idx) {
+                        if (tick.agent_to_promote == doublecross_idx) {
                             //assert(allocations[tick.agent_to_promote].agent.item_id() == doublecross_id);
                             // Push back because we know that this is optimal position.
                             // auto res = pull_back(allocations, tick.i, epsilon, max_iter);
@@ -401,8 +410,25 @@ namespace peris {
 
                             // Reset to previous state and reallocate.
                             // Restore savestate.
-                            increase_offset = true;
+                            //increase_offset = true;
+                            if (enable_doublecross) {
+                                pause = true;
+                            }
+                            i = tick.i + 1;
                         } else {
+                            // try_swap = !try_swap;
+                            // if (try_swap) {
+                            //     displace_up(allocations, tick.i, tick.agent_to_displace);
+                            //     i = tick.agent_to_displace;
+                            //     continue;
+                            // } else {
+                            //     displace_down(allocations, tick.agent_to_promote, allocations.size() - 1);p
+                            //     i = tick.agent_to_promote;
+                            //     continue;
+                            // }
+                            if (tick.agent_to_promote < doublecross_idx) {
+                                --doublecross_idx;
+                            }
                             displace_down(allocations, tick.agent_to_promote, allocations.size() - 1);
                             i = tick.agent_to_promote;
                             ++reserve;
@@ -410,46 +436,65 @@ namespace peris {
                     } else {
                         assert(tick.agent_to_displace < tick.i); // The agent to displace should be at a lower index.
                         // Displace the current agent 'a' to position 'agent_to_displace', shifting other agents accordingly.
-                        if (doublecross_idx != -1 && tick.agent_to_displace < doublecross_idx + try_offset) {
-                            // We are displacing an offset agent so this will ruin our structure and potentially cause a loop.
-                            increase_offset = true;
-                            if (tick.i == doublecross_idx) {
-                                i = tick.i + 1;
-                            }
-                        } else {
-                            displace_up(allocations, tick.i, tick.agent_to_displace);
-                            i = tick.agent_to_displace;
-                        }
+                        // if (doublecross_idx != -1 && tick.agent_to_displace < doublecross_idx + try_offset) {
+                        //     // We are displacing an offset agent so this will ruin our structure and potentially cause a loop.
+                        //
+                        //     if (tick.i == doublecross_idx) {
+                        //         i = tick.i + 1;
+                        //     } else {
+                        //         increase_offset = true;
+                        //     }
+                        // } else {
+                        //     displace_up(allocations, tick.i, tick.agent_to_displace);
+                        //     i = tick.agent_to_displace;
+                        // }
+                        displace_up(allocations, tick.i, tick.agent_to_displace);
+                        i = tick.agent_to_displace;
                     }
 
                     if (increase_offset) {
-                        if (tick.agent_to_promote != -1 && tick.i + 1 < doublecross_idx + try_offset) {
-                           // return SolutionResult::err_unknown;
-                            displace_up(allocations, tick.i, tick.agent_to_displace);
-                            i = tick.agent_to_displace;
-                            continue;
-                        }
+                        // if (tick.agent_to_promote != -1 && tick.i + 1 < doublecross_idx + try_offset) {
+                        //    // return SolutionResult::err_unknown;
+                        //     if (tick.agent_to_promote == doublecross_idx) {
+                        //         // Ignore - within epsilon (must be).
+                        //         i = tick.i + 1;
+                        //     } else {
+                        //         displace_up(allocations, tick.i, tick.agent_to_displace);
+                        //         i = tick.agent_to_displace;
+                        //         continue;
+                        //     }
+                        // }
 
-                        if (false && doublecross_idx + try_offset + 1 >= allocations.size() - reserve - 1) { // We are on the 'frontier'.
-                            i = allocations.size() - reserve; // Allocate next reserve agent.
-                            continue;
-                        } else {
-                            allocations = std::vector<Allocation<A, I>>(savestate);
-                            ++try_offset; // Try the next offset.
-                            if (try_offset > 0) {
-                                auto res = pull_to(allocations, doublecross_idx + 1, try_offset, epsilon, max_iter);
-                                if (res < 1) {
-                                    return res;
-                                }
-                            }
-
-                            i = doublecross_idx + try_offset;
-                            if (i >= allocations.size()) {
-                                return SolutionResult::success;
-                            }
-                        }
+                        // if (false && doublecross_idx + try_offset + 1 >= allocations.size() - reserve - 1) { // We are on the 'frontier'.
+                        //     i = allocations.size() - reserve; // Allocate next reserve agent.
+                        //     continue;
+                        // } else {
+                        //     allocations = std::vector<Allocation<A, I>>(savestate);
+                        //     ++try_offset; // Try the next offset.
+                        //     if (try_offset > 0) {
+                        //         auto res = pull_to(allocations, doublecross_idx + 1, try_offset, epsilon, max_iter);
+                        //         if (res < 1) {
+                        //             return res;
+                        //         }
+                        //     }
+                        //
+                        //     i = doublecross_idx + try_offset;
+                        //     if (i >= allocations.size()) {
+                        //         return SolutionResult::success;
+                        //     }
+                        // }
                     }
+                } else if (tick.agent_to_promote != -1) {
+                    // if (tick.agent_to_promote > doublecross_idx) {
+                    //     displace_down(allocations, tick.agent_to_promote, allocations.size() - 1);
+                    //     i = tick.agent_to_promote;
+                    //     ++reserve;
+                    // } else {
+                    //     i = tick.i + 1;
+                    // }
+                    i = tick.i + 1;
                 }
+
             }
 
         }
@@ -722,12 +767,12 @@ namespace peris {
             return SolutionResult::success;
         }
 
-        static SolutionTick try_align(std::vector<Allocation<A, I>>& allocations, size_t i, size_t end, double epsilon, int max_iter = 100) {
+        static SolutionTick try_align(std::vector<Allocation<A, I>>& allocations, size_t i, size_t end, double p0, double epsilon, int max_iter = 100) {
             // Initialize the first allocation if starting from index 0
             if (i == 0) {
                 // Set the price of the first allocation to zero.
                 // This essentially 'anchors' the algorithm so that all other allocations can be distributed around this value.
-                allocations[0].set_price(0.0f);
+                allocations[0].set_price(p0);
 
                 // We have allocated agent 0 so we can start at agent 1.
                 i = 1;
@@ -861,9 +906,9 @@ namespace peris {
                         return SolutionTick::displace(i, agent_to_displace);
                     }
                 } else {
-                    // if (agent_to_promote >= 0) {
-                    //     return SolutionTick::promote(i, agent_to_promote);
-                    // }
+                    if (agent_to_promote >= 0) {
+                        return SolutionTick::promote(i, agent_to_promote);
+                    }
                     // The current allocation is successful, so we can move on to the next one.
                     ++i;
                 }
@@ -1002,7 +1047,53 @@ namespace peris {
             }
         }
 
+
+
     public:
+        void equilibriate_demand(double delta, double epsilon = 0.00005) {
+            for (size_t i = 1; i < allocations.size(); i++) {
+                allocations[i].favourite = 0;
+            }
+            for (size_t i = 1; i < allocations.size(); i++) {
+                auto a = allocations[i];
+                double u_max = 0.f;
+                std::vector<ssize_t> i_max{};
+                for (size_t j = 0; j < allocations.size(); j++) {
+                    // Determine whether
+                    Allocation<A, I>& other = allocations[j];
+                    if (a.agent.income() > other.price) {
+                        double u = a.agent.utility(other.price, other.quality());
+                        if (u > u_max) {
+                            if (u > u_max + epsilon) {
+                                i_max.clear();
+                            }
+                            u_max = u;
+                            i_max.push_back(j);
+                        } else if (u + epsilon > u_max) {
+                            i_max.push_back(j);
+                        }
+                    }
+                }
+
+                for (auto i : i_max) {
+                   ++allocations[i].favourite;
+                }
+            }
+
+            for (size_t i = 1; i < allocations.size(); i++) {
+                if (allocations[i].favourite > 1) {
+                    // Increase price
+                    allocations[i].price += delta;
+                    allocations[i].set_price(allocations[i].price);
+                } else if (allocations[i].favourite <= 0) {
+                    allocations[i].price -= delta;
+                    allocations[i].set_price(allocations[i].price);
+                }
+            }
+
+            // Now reallocate:
+
+        }
         ///
         /// @brief Verifies that the current allocation is a valid solution.
         ///
@@ -1014,7 +1105,8 @@ namespace peris {
         ///
         /// @return True if the current allocation is valid; false otherwise.
         ///
-        bool verify_solution(const double epsilon = 1e-6) const {
+        bool verify_solution(const double epsilon = 1e-7) const {
+            bool valid = true;
             for (size_t i = 0; i < allocations.size(); ++i) {
                 double u = allocations[i].agent.utility(allocations[i].price, allocations[i].item.quality());
                 if (u != allocations[i].utility) {
@@ -1026,18 +1118,18 @@ namespace peris {
                     if (i != j) {
                         if (allocations[j].agent.item_id() == allocations[i].agent.item_id()) {
                             std::cout << "Agent " << i << " has the same item_id as " << j << "; item_id= " << allocations[j].agent.item_id() << std::endl;
-                            return false;
+                            valid = false;
                         }
                         // Compute the utility agent i would get from allocation j
                         const double u_alt = allocations[i].agent.utility(allocations[j].price + 2.f * epsilon, allocations[j].item.quality());
                         if (u_alt > u) {
                             std::cout << "Agent " << i << " prefers allocation " << j << "; " << u_alt << ">" << u << std::endl;
-                            return false;
+                            valid = false;
                         }
                     }
                 }
             }
-            return true;
+            return valid;
         }
 
         ///
@@ -1047,7 +1139,7 @@ namespace peris {
         ///
         /// @return True if drawing was successful; false if terminated.
         ///
-        bool draw(RenderState<A, I>* render_state) {
+        RenderCommand draw(RenderState<A, I>* render_state) {
             return render_state->draw_allocations(this->allocations, -1);
         }
 
